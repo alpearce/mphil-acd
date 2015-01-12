@@ -1,0 +1,19 @@
+# a stub makefile - if we make in this directory, make one of the children
+
+CHERILIBS_DIR   = ../cherilibs/trunk
+TOOLS_DIR       = $(CHERILIBS_DIR)/tools
+INCLUDE_DIR     = $(CHERILIBS_DIR)/include
+
+CC = sde-gcc
+AS = mips64-as
+LD = sde-ld
+OBJCOPY = sde-objcopy
+OBJDUMP = mips64-objdump
+
+clean:
+	$(MAKE) -C hello-minilib clean
+	$(MAKE) -C cheritest clean
+	rm -f initial.hex
+
+%:
+	$(MAKE) -C hello-minilib $@

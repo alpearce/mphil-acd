@@ -1,0 +1,20 @@
+import DMAVideoSource::*;
+import TPadLCDdriver::*;
+import AvalonStreaming::*;
+
+module mktopVid();
+	DMAVideoSourceIfc tubby <- mkDMAVideoSource();
+	TPadTiming16bitIfc tammy <- mkTPadTiming16bit();
+	
+	rule checkPixels;
+		if (tubby.aso.stream_out_valid) begin
+		$display("stream_out_data: %x, stream_out_startofpacket: %d, stream_out_endofpacket: %d", 
+			tubby.aso.stream_out_data,
+			tubby.aso.stream_out_startofpacket,
+			tubby.aso.stream_out_endofpacket);
+		end
+	endrule
+	rule ready;
+		tubby.aso.stream_out(True);
+	endrule
+endmodule

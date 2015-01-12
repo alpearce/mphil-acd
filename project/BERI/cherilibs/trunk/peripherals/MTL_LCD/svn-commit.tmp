@@ -1,0 +1,4 @@
+Fix the number of flash/SRAM address pins exported.  It is unknown how this was mis-generated.
+--This line, and those below, will be ignored--
+
+M    mkMTL_Framebuffer_Flash_hw.tcl

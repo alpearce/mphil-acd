@@ -1,0 +1,736 @@
+
+#include "../../../../cherilibs/trunk/include/parameters.h"
+#include "cap.h"
+
+#define DRAM_BASE (0x9800000001000000)
+#define TLB_ALIAS_BASE (0x0000000050000000ULL)
+#define SGDMA_DESCR (0x9000000008000000ULL)
+#define SGDMA_SLAVE (0x9000000008010000ULL)
+#define BUTTONS (0x900000007F009000ULL)
+
+#define IO_RD(x) (*(volatile unsigned long long*)(x))
+#define IO_RD32(x) (*(volatile int*)(x))
+#define IO_WR(x, y) (*(volatile unsigned long long*)(x) = y)
+#define IO_WR_BYTE(x, y) (*(volatile unsigned char*)(x) = y)
+//#define rdtscl(dest) __asm__ __volatile__("mfc0 %0,$9; nop" : "=r" (dest))
+
+unsigned int contextDone = 0;
+
+//HACK : Forces ld to output a data section which in turn causes it to output a .bss section 
+//filled with 0s in the raw binary (Currently don't init .bss at startup so this is needed for correct operation)
+int makeBss = 1;
+
+char * heap = (char *)DRAM_BASE;
+
+void writeUARTChar(char c)
+{
+	//Code for SOPC Builder serial output
+	while ((IO_RD32(MIPS_PHYS_TO_UNCACHED(CHERI_JTAG_UART_BASE)+4) &
+	    0xFFFF) == 0) {
+		asm("add $v0, $v0, $0");
+	}
+	//int i;
+	//for (i=0;i<10000;i++);
+	IO_WR_BYTE(MIPS_PHYS_TO_UNCACHED(CHERI_JTAG_UART_BASE), c);
+}
+
+void writeString(char* s)
+{
+	while(*s)
+	{
+		writeUARTChar(*s);
+		++s;
+	}
+}
+
+void writeUARTCharLoopback(char c)
+{
+	//Code for SOPC Builder serial output
+	int in;
+	do {
+		in = IO_RD(MIPS_PHYS_TO_UNCACHED(CHERI_LOOPBACK_UART_BASE) +
+		    32);
+		asm("add $v0, $v0, $0");
+	} while(in != 0xFFFFFFFF && (in & 0xFFFF0000) > 0x00FF0000); // Arbitrary level we want to stay below.
+//	int i;
+//	for (i=0;i<10000;i++);
+	/* XXXRW: This cannot possibly work. */
+	int val = 0x0000FF00 & c;
+	IO_WR_BYTE(MIPS_PHYS_TO_UNCACHED(CHERI_LOOPBACK_UART_BASE), val);
+}
+
+void writeStringLoopback(char* s)
+{
+	while(*s)
+	{
+		writeUARTCharLoopback(*s);
+		++s;
+	}
+}
+
+void writeHex(unsigned long long n)
+{
+	unsigned int i;
+	for(i = 0;i < 16; ++i)
+	{
+		unsigned long long hexDigit = (n & 0xF000000000000000L) >> 60L;
+//		unsigned long hexDigit = (n & 0xF0000000L) >> 28L;
+		char hexDigitChar = (hexDigit < 10) ? ('0' + hexDigit) : ('A' + hexDigit - 10);
+		writeUARTChar(hexDigitChar);
+		n = n << 4;
+	}
+}
+
+
+void writeDigit(unsigned long long n)
+{
+	unsigned int i;
+	unsigned int top;
+	char tmp[17];
+	char str[17];
+	
+	for(i = 0;i < 17; ++i) str[i] = 0;
+	i = 0;
+	while(n > 0) {
+		tmp[i] = '0' + (n % 10);
+		n /= 10;
+		i = i + 1;
+	}
+	i--;
+	top = i;
+	while(i > 0) {
+		str[top - i] = tmp[i];
+		i--;
+	}
+	str[top] = tmp[0];
+	writeString(str);
+}
+
+
+char readUARTChar()
+{
+	int i;
+	char out;
+	//Code for SOPC Builder serial output
+	i = IO_RD32(MIPS_PHYS_TO_UNCACHED(CHERI_JTAG_UART_BASE));
+//	while((i >> 16) == 0) 
+	while((i & 0x00800000) == 0)
+	{
+		i = IO_RD32(MIPS_PHYS_TO_UNCACHED(CHERI_JTAG_UART_BASE));
+		/*
+		writeHex(i);
+		writeString(" and the char:");
+		out = (char)i;
+		writeUARTChar(out);
+		writeString("\n");
+		*/
+	}
+	
+//	while(i&0x80 == 0) {i = IO_RD(MIPS_PHYS_TO_UNCACHED(CHERI_JTAG_UART_BASE));}
+	i = i >> 24;
+	out = (char)i;
+	return out;
+}
+/*
+unsigned long long fib(unsigned long long n)
+{
+	if(n == 0 || n == 1)
+		return 1;
+	
+	return fib(n - 1) + fib(n - 2);
+}
+
+inline void sysCtrlTest()
+{
+     asm("mtc0 $sp, $13");
+     asm("mfc0 $sp, $13");
+}
+*/
+
+void in(int num) { 
+    asm("and $t0, $a0, $a0");
+}
+
+int out() { 
+    asm("and $v0, $t0, $t0");
+}
+
+int ll(int * ldAddr)
+{
+	asm("ll $v0, 0($a0)");
+}
+
+int sc(int * stAddr, int stValue)
+{
+	asm("sc $a1, 0($a0)");
+	asm("move $v0, $a1");
+}
+
+int testNset(int * stAddr, int stValue)
+{
+	asm("ll $v0, 0($a0)");
+	asm("sc $a1, 0($a0)");
+	asm("move $v0, $a1");
+}
+
+int getCount()
+{
+	int count;
+	asm volatile("mfc0 %0, $9": "=r" (count));
+	return count;
+}
+
+int debugTlb()
+{
+	asm("mtc0 $0, $25");
+}
+
+int debugRegs()
+{
+	asm("mtc0 $0, $26");
+}
+
+int cp0Regs()
+{
+	asm("mtc0 $0, $27");
+}
+
+int causeTrap()
+{
+	asm("addi $v0, $0, 10");
+	asm("addi $a0, $0, 0x98");
+	asm("dsll32 $a0,$a0,24");	
+	asm("tgei $v0, 5");
+	asm("sd $0, 10($a0)");
+	asm("addi $v0, $0, 20");
+}
+
+int setInterrupts()
+{
+	asm("mfc0 $a0, $12");
+	asm("ori $a0, $a0, 0xFF01");
+	asm("mtc0 $a0, $12");
+	// Turn on Interrupts for loopback uart.
+	IO_WR_BYTE(MIPS_PHYS_TO_UNCACHED(CHERI_LOOPBACK_UART_BASE) + 32,
+	    0x00000001);
+}
+
+void drawRect(int color, int solid, int x, int y, int length, int height)
+{
+	long offset = y*800 + x;
+	long addOff = 0;
+	long totOff = 0;
+	int i, j;
+	
+	if (solid) {
+		for (i=0; i<height; i++) {
+			for (j=0; j<length; j++) {
+				addOff = (800*i) + j;
+				totOff = (offset+addOff)<<2;
+				FBSWR(color, totOff);
+			}
+		}
+	} else {
+		// Draw top
+		for (i=0; i<length; i++) FBSWR(color, (offset+i)<<2);
+		// Draw bottom
+		for (i=0; i<length; i++) FBSWR(color, (offset+800*height+i)<<2);
+		// Draw left
+		for (i=0; i<height; i++) FBSWR(color, (offset+800*i)<<2);
+		// Draw right
+		for (i=0; i<height; i++) FBSWR(color, (offset+length+800*i)<<2);
+	}
+}
+
+void draw3DRect(int color, int x, int y, int length, int height)
+{
+	int darkerColor = 0x0;
+	darkerColor |= (color>>1)&0xFF000000;
+	darkerColor |= (color>>1)&0x00FF0000;
+	darkerColor |= (color>>1)&0x0000FF00;
+	int solid = 1;
+	int empty = 0;
+	// Bottom Shadow
+	drawRect(darkerColor, 	solid, x+2, 				y+height-2, 	length-2, 	1);
+	// Right Shadow
+	drawRect(darkerColor, 	solid, x+length-2, 	y+2, 					1, 					height-2);
+	// Body
+	drawRect(color, 				solid, x, 					y, 						length-2, 	height-2);
+}
+
+/* ====================================================================================
+    Subroutines for Array bounds checking benchmark
+   ==================================================================================== */
+
+void * malloc(unsigned long size) {
+  void * rtnPtr = heap;
+  if (heap < (char *)0x9800000030000000) heap += size;
+  else heap = (char *)DRAM_BASE;
+  rtnPtr = (char *) ((long long)rtnPtr & 0xFFFFFFFFFFFFFFF0);
+  return rtnPtr;  
+}
+
+void free(__capability void * ptr) {
+  
+}
+
+int freeChar (char * ptr) {
+  return 0;
+}
+
+int freeInt (int * ptr) {
+  return 0;
+}
+
+int * randomIndexArray(int size) {
+	long long i;
+	int *idcs = malloc(size*sizeof(int));
+	for (i=0; i<size; i++) {
+		idcs[i] = getCount()%size;
+	}
+	return idcs;
+}
+
+__capability char * randomArray(int size) {
+	int i;
+	char fill=0;
+	__capability char *array = (__capability char *)malloc(size);
+	for (i=0; i<size; i++) {
+		array[i]=fill--;
+	}
+	return array;
+}
+
+int raise(int base, int exp) {
+	int i;
+	int ret = 1;
+	for (i=0; i<exp; i++) {
+		ret *= base;
+	}
+	return ret;
+}
+
+#define RUNS  	 	100L
+#define POWS  	 	6L
+
+int arrayBench()
+{
+  int size, run, i, j, sum, runOfRuns;
+	int index;
+	long long accum;
+	long long times[POWS];
+	int * indices;
+	__capability char * array;
+	int runs = 0;
+	accum = 0;
+	int requestStart, requestEnd;
+	for (j=0; j<POWS; j++) times[j] = 0;
+
+  for (size = 1, j=0; j < POWS; size*=10, j++) {
+    indices = randomIndexArray(size);
+    requestStart = getCount();
+    array = (__capability char *)malloc(size);//randomArray(size);
+    for (i=0; i<size; i++) {
+      index = indices[i];
+      sum += (int)(array[index]);
+    }
+    //freeChar(array);
+    requestEnd = getCount();
+    if (requestEnd-requestStart > 0) {
+      accum += (requestEnd - requestStart);
+      runs++;
+    }
+    freeInt(indices);
+
+    accum = accum/runs;
+    //printf( "size: %10d time: %20lld nanoseconds", raise(10,j), accum);
+    writeString( " size: ");
+    writeHex(size);
+    writeString( " sum: ");
+    writeHex(sum);
+    writeString( "\n");
+    times[j] += accum;
+    accum = 0;
+    runs = 0;
+    sum = 0;
+  }
+	writeString("\nSummary:\n");
+	for (j=0; j<POWS; j++) {
+		accum = times[j];
+		writeString( "size: ");
+    writeHex(raise(10,j));
+    writeString( "time: 0x");
+    writeHex(accum);
+    writeString( " nanoseconds\n");
+	}
+	return 0;
+}
+
+/* ====================================================================================
+    End of Block of Subroutines
+   ==================================================================================== */
+
+
+/* ====================================================================================
+    Subroutines for Quicksort bounds checking benchmark
+   ==================================================================================== */
+   
+#define SIZE  	  	100LL
+#define QSRUNS 		2LL
+   
+/* This is mostly adapted from http://www.zentut.com/c-tutorial/c-quicksort-algorithm/ */
+
+void swap(__capability char *list,int x,int y)
+{
+   char temp;
+   temp = list[x];
+   list[x] = list[y];
+   list[y] = temp;
+}
+ 
+int choose_pivot(long i,long j )
+{
+   return((i+j) /2);
+}
+ 
+void quicksort(__capability char * list,int m,int n)
+{
+   char key;
+   int i,j,k;
+   if( m < n)
+   {
+      k = choose_pivot(m,n);
+      swap(list,m,k);
+      key = list[m];
+      i = m+1;
+      j = n;
+      while(i <= j)
+      {
+         while((i <= n) && (list[i] <= key))                 
+                i++;          
+         while((j >= m) && (list[j] > key))
+                j--;
+         if( i < j)
+                swap(list,i,j);
+      }
+      // swap two elements
+      swap(list,m,j);
+      // recursively sort the lesser list
+      quicksort(list,m,j-1);
+      quicksort(list,j+1,n);
+   }
+}
+
+int sumArray(__capability char * array, long long size) {
+	int i, sum=0;
+	for (i=0; i<size; i++) {
+		sum += array[i];
+	}
+	return sum;  
+}
+ 
+int doQuicksort()
+{
+   __capability char * list;
+   writeString( "a1");
+   int i, size, sum;
+   unsigned long long accum = 0;
+ 
+   //printf("The list before sorting is:\n");
+   //printlist(list,SIZE);
+ 
+   unsigned long long requestStart, requestEnd;
+   
+   for (size=SIZE; size<(SIZE*10000); size=size*2) {
+     for (i=0; i<QSRUNS; i++) {
+       writeString( "a3");
+       list = randomArray(size);
+       //while(getCount()>0x1000);
+       requestStart = getCount();
+       // sort the list using quicksort
+       quicksort(list,0,size-1);
+       sum += sumArray(list, size);
+       requestEnd = getCount();
+       if (requestEnd > requestStart) accum += (requestEnd - requestStart);
+       free(list);
+     }
+     accum = accum/QSRUNS;
+     writeString(" size: ");
+     writeDigit(size);
+     writeString("  sum: ");
+     writeHex(sum);
+     writeString( "   time: ");
+     writeDigit(accum);
+     writeString( " cycles\n");
+     accum = 0;
+     sum = 0;
+   }
+   // print the result
+   //printf("The list after sorting using quicksort algorithm:\n");
+   return 0;
+}
+   
+/* ====================================================================================
+    End of Block of Subroutines
+   ==================================================================================== */
+/*
+void 	dlnC0		(int decVal) 	{asm("mtc2 $a0, $0, 0");}
+void 	ibsC0		(int decVal) 	{asm("mtc2 $a0, $0, 1");}
+int 	mvlnC0	() 						{asm("mfc2 $v0, $0, 0");}
+int 	mvbsC0	() 						{asm("mfc2 $v0, $0, 1");}
+int 	mvtpC0	() 						{asm("mfc2 $v0, $0, 2");}
+int 	mvpmC0	() 						{asm("mfc2 $v0, $0, 3");}
+int 	mvusC0	() 						{asm("mfc2 $v0, $0, 4");}
+*/
+int main(void)
+{
+	int i;
+	int j;
+	int data;
+	int data2;
+	char in = 0;
+	i = 0x0000000004000500;
+	int numBad = 1;
+	int count;
+	long long cpi;
+	volatile void *wptr;
+	short leds = 0;
+	char capInit = 0;
+	
+	//mv1kC1(0x9800000040000000, 0x9800000000001000);
+	
+	//setInterrupts();
+	//writeStringLoopback("Stack TLB entry setup.\n");
+	writeString("UART serial interface TLB entry setup.\n");
+	writeString("  MMU setup.\n");
+	//debugTlb();
+	//cp0Regs();
+	
+//	causeTrap();
+//	writeString("Came back from trap and still alive :)\n");
+
+//	sysCtrlTest();
+//	data = rdtscl(5);
+
+	while(in != 'Q') {
+		if (in != '\n') {
+			writeString("\n Menu:\n");
+			writeString("   \"L\" for load-linked and store-conditional test.\n");
+			writeString("   \"B\" array bounds checking benchmark.\n");
+			writeString("   \"D\" for multiply and divide test.\n");
+			writeString("   \"C\" for Count register test.\n");
+			writeString("   \"M\" for eternal memory test.\n");
+			writeString("   \"V\" for framebuffer test.\n");
+			writeString("   \"K\" for Capability initialization.\n");
+			writeString("   \"l\" to invert LEDs.\n");
+			writeString("   \"T\" for touchscreen test.\n");
+			writeString("   \"q\" for quicksort boundschecking test.\n");
+			writeString("   \"Q\" to quit.\n");
+		}
+
+		in = readUARTChar();
+		writeUARTChar(in);
+		writeString("\n");
+		//writeHex(in);
+		//writeString("\n");
+		
+		if (in == 'L') {
+			writeString("Load-linked and store-conditional test:\n");
+			data = 13;
+			data = ll(&data);
+			data = sc(&data, 14);
+			//writeHex(data);
+			writeString(" < load-linked and store-conditional result (0)\n");
+			data = testNset(&data, 14);
+			//writeHex(data);
+			writeString(" < test and set result (1)\n");
+		}
+		
+		if (in == 'T') {
+			int * tX= (int *)0x9000000005000000;
+			int * tY= (int *)0x9000000005000004;
+			int * tDown= (int *)0x9000000005000008;
+			writeString("X:");
+			data = *tX;
+			writeHex(data);
+			
+			writeString("   Y:");
+			data = *tY;
+			writeHex(data);
+			
+			writeString("   Down:");
+			data = *tDown;
+			writeHex(data);
+			
+			writeString("\n");
+		}
+		
+		if (in == 'D') {
+			numBad = 1;
+			writeString("Multiply and divide test.\n");
+			for (i = -10; i < 10; i++) {
+				data = numBad * i;
+				writeHex(numBad);
+				writeString(" * ");
+				writeHex(i);
+				writeString(" = ");
+				writeHex(data);
+				writeString("\n");
+				if (i!=0) data2 = data / i;
+				writeHex(data);
+				writeString(" / ");
+				writeHex(i);
+				writeString(" = ");
+				writeHex(data2);
+				writeString("\n");
+				writeString("\n");
+				if (data == 0) data = 1;
+				numBad = data;
+			}
+		}
+		
+		if (in == 'M') {
+			writeString("Memory test:\n");
+			i = 0;
+			while(1) 	{
+				count = getCount();
+        //writeString("count:");
+				//writeHex(count);
+        //writeString("\n");
+				int idx = 0;
+				for (j=0; j<0x4000; j++) {
+					idx = i+j;
+					((volatile int *)DRAM_BASE)[idx] = DRAM_BASE + (idx<<2);
+				}
+				for (j=0; j<0x4000; j++) {
+					idx = i+j;
+					data = ((volatile int *)DRAM_BASE)[idx];
+					if (data != (int)(DRAM_BASE + (idx<<2))) {
+						//writeHex((int)(DRAM_BASE + (idx<<2))); 
+						//writeString(" = ");
+						//writeHex(data);
+						//writeString("?\n");
+						numBad++;
+					}
+				}
+				cpi = getCount() - count;
+        //writeString("newCount - count:");
+				//writeHex(cpi);
+				//writeString("\n");
+        
+				writeHex((int)(DRAM_BASE + (idx<<2))); 
+				writeString(" = ");
+				writeHex(data);
+				writeString("?\n");
+				if (numBad == 0) {
+					writeString("All good! \n");
+				} else {
+					writeHex(numBad);
+					writeString(" were bad :(\n");
+					numBad = 0;
+				}
+				cpi = (cpi*1000);
+        
+        //writeString("diff*1000:");
+				//writeHex(cpi);
+       //writeString("\n");
+       
+        // 9 instructions in the first loop, 13 in the second.
+				cpi = cpi/((9+13)*0x4000);
+        
+				writeString("CPI of ");
+				writeDigit(cpi);
+				writeString("\n");
+				
+				i+=0x4000;
+				if (i > 0x07000000) i = 0;
+			}
+		}
+		if (in == 'C') {
+			writeString("Count Register Test:\n");
+			for(i=0;i<10;i++) 	{
+				data = ((volatile int *)MIPS_PHYS_TO_UNCACHED(CHERI_COUNT))[0];
+				writeHex(data);
+				writeString(", ");
+			}
+			writeString("\n");
+		}
+		
+		if (in == 'K') {
+			if (capInit==0) {
+				FBIncBase(0x9000000004000000);
+				long length = FBGetLeng();
+				length = length - 800*600*2;
+				FBDecLeng(length);
+				capInit = 1;
+			}
+			
+			writeString("C4.base=    ");writeHex(FBGetBase());writeString("\n");
+			writeString("C4.length=  ");writeHex(FBGetLeng());writeString("\n");
+			CapRegDump();
+
+		}
+		if (in == 'V') {
+			int color = 0x8888;
+			int x = 50;
+			int y = 50;
+			int length = 75;
+			int height = 50;
+			long frameBuff = 0x9000000004000000;
+
+			
+			for (x=200; x<500; x+=100) {
+				for (y=300; y<500; y+=75) {
+					draw3DRect(color, x, y, length, height);
+				}
+			}
+			
+			
+			for (i=0; i<(800*600/4); i++) {
+				FBSDR(0x0C63F80007E0001F,i<<3);
+			}
+			
+			int offset = y*800 + x;
+			int addOff;
+			int totOff;
+			for (i=0; i<(800*600); i++) {
+				((volatile short*)frameBuff)[i] = i;
+			}
+			for (i=0; i<height; i++) {
+				for (j=0; j<length; j++) {
+					addOff = (800*i) + j;
+					totOff = (offset+addOff);
+					((volatile short*)frameBuff)[totOff] = color;
+				}
+			}
+		}
+		if (in == 'l') {
+			leds = ~leds;
+			IO_WR(CHERI_LEDS,leds);
+		}
+		
+		if (in == 'N') {
+			wptr = (void *)CHERI_NET_RX;
+			i = *(volatile int *)wptr;
+			writeString("After accessing CHERI_NET_RX, read:\n");
+			writeDigit(i);
+
+			i = 0xabcd;
+			wptr = (void *)CHERI_NET_TX;
+			writeString("Before writing 123 to CHERI_NET_TX\n");
+			*((volatile int *)CHERI_NET_TX) = i;
+			writeString("After writing 123 to CHERI_NET_TX\n");
+		}
+		
+		if (in == 'B') {
+		  arrayBench();
+		}
+		if (in == 'q') {
+		  doQuicksort();
+		}
+		//debugRegs();
+	}
+
+	return 0;
+}
+

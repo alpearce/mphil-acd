@@ -1,0 +1,6 @@
+mk*.cxx
+mk*.h
+mkTestBRAMLCircularBufferF
+schedule.*
+mkTestBRAMCircularBuffer
+*.sched

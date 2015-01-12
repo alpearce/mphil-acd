@@ -1,0 +1,4 @@
+*.o
+*~
+build/cheri/GCC/dep/
+lib/cheri/GCC/

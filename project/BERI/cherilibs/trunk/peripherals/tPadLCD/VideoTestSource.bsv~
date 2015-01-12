@@ -1,0 +1,99 @@
+/*****************************************************************************
+ Copyright (c) 2011 Simon William Moore <simon.moore@cl.cam.ac.uk>
+ All rights reserved.
+
+ This software was developed by SRI International and the University of
+ Cambridge Computer Laboratory under DARPA/AFRL contract (FA8750-10-C-0237)
+ ("CTSRD"), as part of the DARPA CRASH research programme.
+
+ Redistribution and use in source and binary forms, with or without
+ modification, are permitted provided that the following conditions
+ are met:
+ 1. Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+ 2. Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in the
+    documentation and/or other materials provided with the distribution.
+
+ THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ SUCH DAMAGE.
+
+ *****************************************************************************
+
+ VideoTestSource
+ ===============
+ 
+ This peripheral produces an AvalonStream of pixel values with a test
+ pattern to test TPadLCDdriver.
+ 
+ Currently the resolution is assumed to be 800x600 but this should probably
+ be parameterised.
+  
+ *****************************************************************************/
+
+package VideoTestSource;
+
+import FIFO::*;
+import GetPut::*;
+import AvalonStreaming::*;
+
+typedef struct {
+   UInt#(5) r;   // red
+   UInt#(6) g;   // green
+   UInt#(5) b;   // blue
+   } RGBT deriving (Bits,Eq);
+
+interface VideoTestSourceIfc;
+   interface AvalonPacketStreamSourcePhysicalIfc#(SizeOf#(RGBT)) aso;
+endinterface
+
+
+(* synthesize,
+   reset_prefix = "csi_clockreset_reset_n",
+   clock_prefix = "csi_clockreset_clk" *)
+module mkVideoTestSource(VideoTestSourceIfc);
+   
+   AvalonPacketStreamSourceIfc#(RGBT) stream_out <- mkPut2AvalonPacketStreamSource;
+   
+   let xres = 800;  // X resolution
+   let yres = 600;  // Y resolution
+   
+   Reg#(Bit#(12)) x <- mkReg(0);
+   Reg#(Bit#(12)) y <- mkReg(0);
+   
+   rule scan;
+      RGBT p = unpack(0);
+      let sof = (x==0) && (y==0);
+      let eof = (x==(xres-1)) && (y==(yres-1));
+      if(x[5] == y[5]) begin
+					p.r = (x[6]==1) || (x[7]==1) ? 5'b11111 : 0;
+					p.g = (x[6]==0) || (x[7]==1) ? 6'b111111 : 0;
+					p.b = y[5]==1 ? 5'b11111 : 0;
+			 end
+//      p.r = unpack(truncate(pack(x)));
+//      p.g = unpack(truncate(pack(y)));
+//      p.b = unpack(truncate(pack(y)>>5));
+      stream_out.tx.put(PacketDataT{d:p, sop:sof, eop:eof});
+
+      if(x<(xres-1)) x <= x+1;
+      else begin
+				x <= 0;
+				y <= y<(yres-1) ? y+1 : 0;
+			end
+   endrule
+   
+   interface aso = stream_out.physical;
+      
+endmodule
+
+
+endpackage

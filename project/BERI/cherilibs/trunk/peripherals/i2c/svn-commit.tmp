@@ -1,0 +1,4 @@
+Updated i2c tcl file used by Qsys.
+--This line, and those below, will be ignored--
+
+M    i2c_avalon_hw.tcl

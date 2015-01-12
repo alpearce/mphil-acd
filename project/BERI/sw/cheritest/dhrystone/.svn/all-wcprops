@@ -1,0 +1,41 @@
+K 25
+svn:wc:ra_dav:version-url
+V 48
+/svn/giet-vm/!svn/ver/243/soft/giet_vm/dhrystone
+END
+dhry_1.c
+K 25
+svn:wc:ra_dav:version-url
+V 57
+/svn/giet-vm/!svn/ver/241/soft/giet_vm/dhrystone/dhry_1.c
+END
+dhry_2.c
+K 25
+svn:wc:ra_dav:version-url
+V 57
+/svn/giet-vm/!svn/ver/241/soft/giet_vm/dhrystone/dhry_2.c
+END
+dhry.h
+K 25
+svn:wc:ra_dav:version-url
+V 55
+/svn/giet-vm/!svn/ver/241/soft/giet_vm/dhrystone/dhry.h
+END
+dhrystone.seg
+K 25
+svn:wc:ra_dav:version-url
+V 62
+/svn/giet-vm/!svn/ver/243/soft/giet_vm/dhrystone/dhrystone.seg
+END
+Makefile
+K 25
+svn:wc:ra_dav:version-url
+V 57
+/svn/giet-vm/!svn/ver/241/soft/giet_vm/dhrystone/Makefile
+END
+dhrystone.ld
+K 25
+svn:wc:ra_dav:version-url
+V 61
+/svn/giet-vm/!svn/ver/241/soft/giet_vm/dhrystone/dhrystone.ld
+END

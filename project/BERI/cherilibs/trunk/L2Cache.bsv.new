@@ -1,0 +1,599 @@
+/*-
+ * Copyright (c) 2013 Jonathan Woodruff
+ * Copyright (c) 2013 Alex Horsman
+ * Copyright (c) 2013 Alan A. Mujumdar
+ * All rights reserved.
+ *
+ * This software was developed by SRI International and the University of
+ * Cambridge Computer Laboratory under DARPA/AFRL contract FA8750-10-C-0237
+ * ("CTSRD"), as part of the DARPA CRASH research programme.
+ *
+ * This software was developed by SRI International and the University of
+ * Cambridge Computer Laboratory under DARPA/AFRL contract FA8750-11-C-0249
+ * ("MRC2"), as part of the DARPA MRC research programme.
+ *
+ * @BERI_LICENSE_HEADER_START@
+ *
+ * Licensed to BERI Open Systems C.I.C. (BERI) under one or more contributor
+ * license agreements.  See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.  BERI licenses this
+ * file to you under the BERI Hardware-Software License, Version 1.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at:
+ *
+ *   http://www.beri-open-systems.org/legal/license-1-0.txt
+ *
+ * Unless required by applicable law or agreed to in writing, Work distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ * @BERI_LICENSE_HEADER_END@
+ */
+
+import MIPS::*;
+import FIFO::*;
+import SpecialFIFOs::*;
+import FIFOF::*;
+import GetPut::*;
+import ClientServer::*;
+import Vector::*;
+import ConfigReg::*;
+import MEM::*;
+import MemTypes::*;
+import Debug::*;
+
+
+typedef Bit#(8) Byte;
+
+typedef Bit#(24) Tag;
+typedef Bit#(11) Key;
+typedef Vector#(32,Byte) CacheLine;
+typedef Vector#(32,Bool) ByteMask;
+
+typedef struct {
+  Tag tag;
+  Key key;
+} CacheAddress deriving (Bits, Eq, Bounded);
+
+typedef struct {
+  `ifdef CAP
+    Bool capability;
+  `endif
+  Tag  tag;
+  Bool valid;
+  Bool dirty;
+  `ifdef MULTI
+    Bit#(MULTICORE) linked;
+    Bit#(TMul#(MULTICORE, 2)) sharers;
+  `endif
+} TagLine deriving (Bits, Eq, Bounded);
+
+typedef struct {
+  `ifdef CAP
+    Bool capability;
+  `endif
+  CacheAddress addr;
+  CacheLine    entry;
+} CacheEviction deriving (Bits, Eq, Bounded);
+
+typedef MemoryRequest#(35,32) CacheRequest;
+typedef MemoryResponse#(256)  CacheResponse;
+
+typedef 4 PrefetchSize;
+
+/* =================================================================
+mkL2Cache
+ =================================================================*/
+
+`ifndef MULTI
+  typedef enum {Init, Serving, MemRead} CacheState deriving (Bits, Eq);
+`else
+  // store conditional in multicore CHERI requires 2 memory accesses. to avoid
+  // updating the cache before a confirmation from the Writeback stage, a separate
+  // rule is used to service the SC. The rule simply checks if the SC is a success
+  // or a fail and does not update the cache.  
+  typedef enum {Init, Serving, MemRead, StoreConditional} CacheState deriving (Bits, Eq);
+`endif
+
+interface L2CacheIfc;
+  interface Server#(CacheRequest, CacheResponse) cache;
+  interface Client#(CacheRequest, CacheResponse) memory;
+  `ifdef MULTI
+    interface Client#(InvalidateCache, InvalidateCache) invalidate;
+    interface Client#(ScPacket, ScPacket) storeConditionalResult; 
+  `endif
+endinterface: L2CacheIfc
+
+(*synthesize*)
+module mkL2Cache(L2CacheIfc ifc);
+  FIFO#(CacheRequest)             preReq_fifo    <- mkBypassFIFO;
+  FIFO#(CacheRequest)             req_fifo       <- mkLFIFO;
+  FIFO#(CacheResponse)            resp_fifo      <- mkBypassFIFO;
+
+  FIFO#(CacheEviction)            evict_fifo     <- mkSizedFIFO(4);
+
+  MEM#(Key, TagLine)              tags           <- mkMEM();
+  MEM#(Key, CacheLine)            data           <- mkMEM();
+  // Total size is 512x256 bits = 64 kbytes.
+
+  FIFO#(CacheRequest)             memReq_fifo    <- mkSizedFIFO(8);
+  FIFO#(CacheResponse)            memResp_fifo   <- mkBypassFIFO;
+
+  Reg#(CacheState)                cacheState     <- mkConfigReg(Init);
+  `ifdef MULTI
+    FIFOF#(InvalidateCache)       invalidateFifo <- mkBypassFIFOF;
+    // If there is a miss on load linked, the tags still need to be updated with the
+    // LL flag. The register below is access by the DRAM rule when the line is fetched
+    //Reg#(Bool)                    missLoadLinked <- mkReg(False);
+    Reg#(Bit#(MULTICORE))         missLoadLinked <- mkReg(0);
+    FIFOF#(ScPacket)              scFifo         <- mkLFIFOF;
+    Reg#(Bit#(16))                missCoreID     <- mkReg(16'hFFFF);
+    Reg#(L1Cache)                 missWhichCache <- mkReg(?);
+  `endif
+
+  Reg#(UInt#(11))  count <- mkReg(0);
+  Reg#(Bit#(4)) reqCount <- mkReg(0);
+  Reg#(Bit#(4)) reqTotal <- mkReg(0);
+  Reg#(Bit#(4)) rspCount <- mkReg(0);
+  Reg#(Bit#(4)) rspTotal <- mkReg(0);
+  FIFO#(Key)    fill_fifo <- mkSizedFIFO(4);
+  
+  rule initialize(cacheState == Init);
+    `ifndef MULTI
+      tags.write(pack(count), TagLine{valid: False, dirty: ?, tag: ?});
+    `else
+<<<<<<< .mine
+      tags.write(pack(count), TagLine{valid: False, linked: False, coreID: 16'hFFFF, blockSharers: 0, sharers: 0});
+=======
+      tags.b.put(True, pack(count), TagLine{valid: False, linked: 0, sharers: 0});
+>>>>>>> .r11620
+    `endif
+    count <= count + 1;
+    if (count == 2047) cacheState <= Serving;
+  endrule
+ 
+  rule putRequest(cacheState == Serving);
+    CacheRequest reqIn = preReq_fifo.first();
+    preReq_fifo.deq();
+    `ifdef MULTI
+      if (reqIn.op == Write && reqIn.linked) begin
+        cacheState <= StoreConditional;
+      end
+    `endif
+    CacheAddress reqAddr = unpack(reqIn.addr);
+    tags.read.put(reqAddr.key);
+    data.read.put(reqAddr.key);
+    req_fifo.enq(reqIn);
+  endrule
+  
+  `ifdef MULTI
+    Bit#(16) currentCoreID  = req_fifo.first.coreID;
+  `endif
+ 
+  CacheRequest req        = req_fifo.first;
+  CacheAddress addr       = unpack(req.addr);
+  CacheLine    writeData  = unpack(req.data);
+  ByteMask     byteEnable = unpack(req.byteenable);
+  Bool         cached     = req.cached;
+  
+  rule getCacheResponse(cacheState == Serving);
+    TagLine tagsRead = tags.read.peek();
+    CacheLine dataRead = data.read.peek();
+    Bool miss = !(addr.tag == tagsRead.tag && tagsRead.valid);
+    CacheState newCacheState = Serving;
+    `ifdef MULTI
+      // Simplest possible cache coherence mechanism is currently used in the default
+      // L2Cache. It simply invalidates the L1's on every write into the L2. It is
+      // highly inefficient but it maintains L1 cache coherency
+      Bool sharedBlock = False;
+      Bit#(MULTICORE) loadLinked = tagsRead.linked;
+      Integer j = 0;
+      Bit#(TMul#(MULTICORE, 2)) sharersList = tagsRead.sharers;
+      for (Integer i=0; i<valueof(TMul#(MULTICORE,2)); i=i+2) begin
+        if ((tagsRead.sharers[i] == 1 || tagsRead.sharers[i+1] == 1) && currentCoreID != fromInteger(j)) begin
+          sharedBlock = True;
+        end
+        j = j + 1;
+      end
+      let index = 2*currentCoreID;
+      if (req.whichCache == Data) begin
+        sharersList[index] = 1;
+      end
+      else begin
+        sharersList[index+1] = 1;
+      end
+      debug($display("L2Cache sharersList %b", sharersList));
+
+      if (req.op == Write) begin
+        InvalidateCache inv = InvalidateCache{shared    : sharedBlock,
+                                              sharers   : sharersList,
+                                              validCore : currentCoreID, 
+                                              addr      : zeroExtend(req.addr)};
+        invalidateFifo.enq(inv);   
+        debug($display("L2Cache Invalidate %x", req.addr)); 
+      end 
+
+      if (req.op == Read && req.linked) begin
+        debug($display("L2Cache Load Linked %x", addr));
+        loadLinked[currentCoreID] = 1;
+      end
+
+      missLoadLinked <= loadLinked;
+      missCoreID <= currentCoreID;
+      missWhichCache <= req.whichCache;
+    `endif
+
+    cycReport($display("[$L2%s%s]", (req.op==Read)?"R":"W",(miss)?"M":"H"));
+
+    case (req.op) matches
+      Cache &&& (req.cacheOp.cache == Level2): begin
+        function Action invalidate() = action
+          debug2("l2", $display("L2Cache Explicit Invalidation: key=%x at time %d", addr.key, $time));
+          tags.write(addr.key, TagLine{valid: False, dirty: ?, tag: ?});
+        endaction;
+        function Action writeback() = action
+          if (tagsRead.valid && tagsRead.dirty) begin
+            debug2("l2", $display("L2Cache Explicit Writeback: %x=%x", addr, dataRead));
+            memReq_fifo.enq(MemoryRequest{
+              `ifdef CAP
+                capability : tagsRead.capability,
+              `endif
+              op         : Write,
+              addr       : {tagsRead.tag,addr.key},
+              data       : pack(dataRead),
+              byteenable : 32'hFFFFFFFF,
+              cached     : False
+            });
+          end
+        endaction;
+        case (req.cacheOp.inst) matches
+          Invalidate &&& (!miss): begin
+            invalidate();
+          end
+          InvalidateWriteback &&& (!miss): begin
+            invalidate();
+            writeback();
+          end
+          InvalidateIndexWriteback: begin
+            invalidate();
+            writeback();
+          end
+          Writeback &&& (!miss): begin
+            writeback();
+          end
+        endcase
+      end
+      Read &&& (!miss && cached): begin
+        debug2("l2", $display("L2Cache Read Hit: %x=%x", addr, pack(dataRead)));
+        //Return cached data.
+        resp_fifo.enq(MemoryResponse{
+          `ifdef CAP
+            capability: tagsRead.capability,
+          `endif
+          data: pack(dataRead)
+        });
+       
+        `ifdef MULTI
+<<<<<<< .mine
+          // If there is a load linked, we update the tags with the LL flag
+          //if (req.linked) begin
+            Bit#(MULTICORE) sharedMapping = tagsRead.sharers;
+            sharedMapping[currentCoreID] = 1;
+            tags.write(addr.key, TagLine{
+              `ifdef CAP
+                capability  : tagsRead.capability,
+              `endif
+              tag           : tagsRead.tag,
+              dirty         : tagsRead.dirty,
+              valid         : tagsRead.valid,
+              op            : Read,
+              linked        : True,
+              coreID        : currentCoreID,
+              blockSharers  : blockSharersList,
+              sharers       : sharedMapping
+            });
+            debug($display("Read Hit! and Load Linked! %x=%x", addr, pack(dataRead)));
+          //end            
+=======
+          // While using the directory coherence scheme we always write the tags
+          tags.b.put(True, addr.key, TagLine{
+            `ifdef CAP
+              capability  : tagsRead.capability,
+            `endif
+            tag           : tagsRead.tag,
+            dirty         : tagsRead.dirty,
+            valid         : tagsRead.valid,
+            linked        : loadLinked,
+            sharers       : sharersList
+          });
+          debug($display("Read Hit! %x=%x", addr, pack(dataRead)));
+>>>>>>> .r11620
+        `endif
+      end
+      Write &&& (!miss && cached): begin
+        //Construct new line.
+        CacheLine maskedWrite = dataRead;
+        for (Integer i = 0; i < 32; i=i+1) begin
+          if (byteEnable[i]) begin
+              maskedWrite[i] = writeData[i];
+          end
+        end
+        debug2("l2", $display("L2Cache Write Hit: %x=%x", addr, maskedWrite));
+        //Write updated line to cache.
+        data.write(addr.key, maskedWrite);
+        tags.write(addr.key, TagLine{
+          `ifdef CAP
+            capability    : req.capability,
+          `endif
+          `ifdef MULTI
+            linked        : 0,
+            sharers       : sharersList,
+          `endif
+          tag             : tagsRead.tag,
+          dirty           : True,
+          valid           : tagsRead.valid
+          });
+      end
+      Write &&& (!cached): begin
+        debug2("l2", $display("L2Cache Uncached Write: addr=%x", addr));
+        //Write directly to memory.
+        memReq_fifo.enq(req);
+        if (!miss) begin
+          //Invalidate existing cache line.
+<<<<<<< .mine
+          tags.write(addr.key, TagLine{valid: False});
+=======
+          `ifndef MULTI
+            tags.b.put(True, addr.key, TagLine{valid: False});
+          `else
+            tags.b.put(True, addr.key, TagLine{valid: False, linked: 0, sharers: 0});
+          `endif   
+>>>>>>> .r11620
+        end
+      end
+      default: begin
+        if (req.op==Read && cached && addr.key < (0 - 5)) reqTotal <= 4;
+        else reqTotal <= 1;
+        reqCount <= 0;
+        rspCount <= 0;
+        rspTotal <= 0;
+        newCacheState = MemRead;
+      end
+    endcase
+    if (newCacheState == Serving) begin
+      req_fifo.deq();
+      let unusedA <- tags.read.get();
+      let unusedB <- data.read.get();
+    end 
+    cacheState <= newCacheState;
+  endrule
+
+  `ifdef MULTI
+    // This rule is accessed during the first SC memory access
+    rule storeConditional(cacheState == StoreConditional);
+      TagLine tagsRead <- tags.read.get();
+      ScPacket res = ScPacket{coreID: req_fifo.first.coreID, valid: True, scResult: False}; 
+      if (!miss && cached && (tagsRead.linked[req_fifo.first.coreID] == 1)) begin
+        debug($display("L2Cache Store Conditional Success"));
+        res.scResult = True; 
+      end
+      else begin
+        debug($display("L2Cache Store Conditional Fail")); 
+      end
+      debug($display("L2Cache Store Conditional %x,%x,%b addr: %x", !miss, cached, tagsRead.linked, req_fifo.first.addr));
+      cacheState <= Serving;
+      scFifo.enq(res);
+
+      // Respond on Store Conditional. Fixes the ABA problem 
+      resp_fifo.enq(MemoryResponse{
+        `ifdef CAP
+          capability: ?,
+        `endif
+        data: zeroExtend(pack(res.scResult))
+      });
+
+      req_fifo.deq();
+    endrule
+  `endif
+  
+  rule putDRAMRequest(cacheState == MemRead && reqCount != reqTotal);
+    TagLine tagsRead <- tags.read.get();
+    CacheLine dataRead <- data.read.get();
+    debug2("l2", $display("L2Cache ", fshow(req.op), " Miss: addr=%x", addr));
+    if (!tagsRead.valid || tagsRead.tag != addr.tag || !cached) begin
+      //Request required cache line from memory.
+      memReq_fifo.enq(MemoryRequest{
+        `ifdef CAP
+          capability  : req.capability,
+        `endif
+        op         : Read,
+        addr       : pack(addr) + zeroExtend(reqCount),
+        //If this was an uncached read, use its byteenable
+        byteenable : (cached) ? 32'hFFFFFFFF:pack(byteEnable),
+        cached     : cached
+      });
+      rspTotal <= rspTotal + 1;
+      if (tagsRead.valid && tagsRead.dirty && cached) begin
+        debug2("l2", $display("L2Cache Evicting: addr=%x", {tagsRead.tag,addr.key}));
+        //Store existing line for eviction.
+        evict_fifo.enq(CacheEviction{
+          `ifdef CAP
+            capability: tagsRead.capability,
+          `endif
+          addr  : CacheAddress{tag: tagsRead.tag, key: addr.key + zeroExtend(reqCount)},
+          entry : dataRead
+        });
+      end
+      fill_fifo.enq(addr.key + zeroExtend(reqCount));
+    end
+    if (reqCount + 1 != reqTotal) begin
+      tags.read.put(addr.key+zeroExtend(reqCount)+1);
+      data.read.put(addr.key+zeroExtend(reqCount)+1);
+    end
+    reqCount <= reqCount + 1;
+  endrule
+
+  rule getDRAMResponse(cacheState == MemRead && reqCount == reqTotal);
+    CacheResponse resp = memResp_fifo.first;
+<<<<<<< .mine
+=======
+
+    `ifdef MULTI
+      Bit#(MULTICORE) sharedMapping = 0;
+      sharedMapping[missCoreID] = 1;
+      Bit#(TMul#(MULTICORE,2)) sharersList = 0;
+      let index = 2*missCoreID;
+      if (missWhichCache == Data) begin
+        sharersList[index] = 1;
+      end
+      else begin
+        sharersList[index] = 1;
+      end
+    `endif
+
+>>>>>>> .r11620
+    case (req.op) matches
+      Read: begin
+        debug2("l2", $display("L2Cache Missed Read: %x=%x", addr.key, resp));
+        //Return data from memory.
+        if (rspCount == 0) resp_fifo.enq(resp);
+        if (cached) begin
+          //Store data in cache.
+          data.write(fill_fifo.first, unpack(resp.data));
+
+          tags.write(fill_fifo.first, TagLine{
+            `ifdef CAP
+              capability: resp.capability,
+            `endif
+            `ifdef MULTI
+<<<<<<< .mine
+              op      : Read,
+              linked  : missLoadLinked,
+              coreID  : missCoreID,
+=======
+              linked        : missLoadLinked,
+              sharers       : sharersList,
+>>>>>>> .r11620
+            `endif
+            tag   : addr.tag,
+            valid : True,
+            dirty : False
+          });
+          `ifdef MULTI
+            for (Integer i=0; i<valueOf(MULTICORE); i=i+1) begin
+              if (missLoadLinked[i] == 1) begin
+                debug($display("L2Cache Miss Load Linked"));
+              end
+            end
+          `endif
+        end
+      end
+      Write: begin
+        CacheLine maskedWrite = unpack(resp.data);
+        for (Integer i = 0; i < 32; i=i+1) begin
+          if (byteEnable[i]) begin
+            maskedWrite[i] = writeData[i];
+          end
+        end
+        debug2("l2", $display("L2Cache Missed Write: %x=%x", addr.key, maskedWrite));
+        data.write(fill_fifo.first, maskedWrite);
+
+        tags.write(fill_fifo.first, TagLine{
+          `ifdef CAP
+            capability: req.capability,
+          `endif
+          `ifdef MULTI
+<<<<<<< .mine
+            op      : Write,
+            linked  : False,
+            coreID  : missCoreID,
+=======
+            linked        : 0,
+            sharers       : sharersList,
+>>>>>>> .r11620
+          `endif
+          tag   : addr.tag,
+          valid : True,
+          dirty : True
+        });
+      end
+    endcase
+    rspCount <= rspCount + 1;
+    memResp_fifo.deq();
+    fill_fifo.deq();
+    if (rspCount + 1 == rspTotal) begin
+      req_fifo.deq();
+      cacheState <= Serving;
+    end
+  endrule
+
+  rule writeDirtyLine(cacheState == MemRead && reqCount == reqTotal);
+    CacheEviction evict = evict_fifo.first;
+    memReq_fifo.enq(MemoryRequest{
+      `ifdef CAP
+        capability    : evict.capability,
+      `endif
+      op         : Write,
+      addr       : pack(evict.addr),
+      data       : pack(evict.entry),
+      byteenable : 32'hFFFFFFFF,
+      cached     : False
+    });
+    evict_fifo.deq();
+    debug2("l2", $display("L2Cache Eviction Writeback: %x=%x", evict.addr, evict.entry));
+  endrule
+
+  interface Server cache;
+    interface Put request;
+      method Action put(CacheRequest reqIn);
+        preReq_fifo.enq(reqIn);
+        //debug2("l2", $display("Put in a L2Cache request: addr=%x tag=%x key=%x byteEnable=%x data=%x at time %d", addr, addr.tag, addr.key, reqIn.byteenable, reqIn.data, $time));
+      endmethod
+    endinterface
+    interface Get response;
+      method ActionValue#(CacheResponse) get();
+        debug2("l2", $display("Delivering Word from the L2Cache: %x at time %d", resp_fifo.first, $time));
+        debug($display("Delivering Word from the L2Cache: %x at time %d", resp_fifo.first, $time));
+        resp_fifo.deq;
+        return resp_fifo.first;
+      endmethod
+    endinterface
+  endinterface
+
+  interface Client memory;
+    interface Get request;
+      method ActionValue#(CacheRequest) get();
+        memReq_fifo.deq();
+        return memReq_fifo.first;
+      endmethod
+    endinterface
+    interface Put response;
+      method Action put(CacheResponse resp);
+        memResp_fifo.enq(resp);
+      endmethod
+    endinterface
+  endinterface
+
+  `ifdef MULTI
+    interface Client invalidate;
+      interface Get request; 
+        method ActionValue#(InvalidateCache) get() if(invalidateFifo.notEmpty);
+          InvalidateCache inv = invalidateFifo.first;
+          invalidateFifo.deq();
+           return inv;
+        endmethod
+      endinterface
+    endinterface
+
+    interface Client storeConditionalResult;
+      interface Get request;
+        method ActionValue#(ScPacket) get() if(scFifo.notEmpty);
+          ScPacket res = scFifo.first;
+          scFifo.deq();
+          return res;
+        endmethod 
+      endinterface
+    endinterface 
+  `endif
+endmodule

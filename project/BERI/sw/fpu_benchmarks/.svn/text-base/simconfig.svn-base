@@ -1,0 +1,71 @@
+# Default cheri configuration.
+
+module ../../../../cherilibs/trunk/peripherals/dram.so
+module ../../../../cherilibs/trunk/peripherals/ethercap.so
+module ../../../../cherilibs/trunk/peripherals/uart.so
+module ../../../../cherilibs/trunk/peripherals/fb.so
+
+device "dram0" {
+	class dram;
+	addr 0x0;
+	length 0x40000000;
+};
+
+ifdef "CHERI_KERNEL" device "kernel" {
+	class dram;
+	addr 0x100000;
+	length 0xff00000;
+	option path getenv "CHERI_KERNEL";
+	option type "mmap";
+	option cow "yes";
+};
+
+ifdef "TPAD_FRAMEBUFFER" device "framebuffer0" {
+	class framebuffer;
+	addr 0x04000000;
+	length 0x01000020;
+	option lazy "yes";
+}
+
+ifdef "CHERI_SDCARD" device "sdcard0" {
+	class sdcard;
+	addr 0x7f008000;
+	length 0x400;
+	option path getenv "CHERI_SDCARD";
+	option readonly "yes";
+};
+
+#
+# If CHERI_CONSOLE_SOCKET is defined, use a local domain socket as specified
+# by the environmental variable.  Otherwise, use stdio.
+#
+ifndef "CHERI_CONSOLE_SOCKET" device "uart0" {
+	class uart;
+	addr 0x7f000000;
+	length 0x20;
+	irq 0;
+	option type "stdio";
+}
+
+ifdef "CHERI_CONSOLE_SOCKET" device "uart0" {
+	class uart;
+	addr 0x7f000000;
+	length 0x20;
+	irq 0;
+	option type "socket";
+	option path getenv "CHERI_CONSOLE_SOCKET";
+}
+
+device "uart1" {
+	class uart;
+	addr 0x7f001000;
+	length 0x20;
+	option type "null";
+};
+
+device "uart2" {
+	class uart;
+	addr 0x7f002000;
+	length 0x20;
+	option type "null";
+}

@@ -1,0 +1,34 @@
+
+extern void __writeString(char* s);
+extern void __writeHex(unsigned long long n);
+extern void __writeDigit(unsigned long long n);
+extern char __readUARTChar();
+extern void __writeUARTChar(char c);
+
+#include "../../cherilibs/trunk/include/parameters.h"
+#include "dhrystone.c"
+#include <stdint.h>
+#include <stddef.h>
+
+#define BUTTONS (0x900000007F009000ULL)
+
+#define IO_RD(x) (*(volatile unsigned long long*)(x))
+#define IO_RD32(x) (*(volatile int*)(x))
+#define IO_WR(x, y) (*(volatile unsigned long long*)(x) = y)
+#define IO_WR32(x, y) (*(volatile int*)(x) = y)
+#define IO_WR_BYTE(x, y) (*(volatile unsigned char*)(x) = y)
+//#define rdtscl(dest) __asm__ __volatile__("mfc0 %0,$9; nop" : "=r" (dest))
+
+#define DIVIDE_ROUND(N, D) (((N) + (D) - 1) / (D))
+
+
+
+
+int main(void)
+{
+	__writeString("Starting");
+	dhrystone();
+	__writeString("Done!");
+	return 0;
+}
+

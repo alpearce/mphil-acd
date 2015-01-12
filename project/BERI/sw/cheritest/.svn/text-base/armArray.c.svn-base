@@ -1,0 +1,210 @@
+//#include "comlib.c"
+#include "armArray.h"
+//#include "box.c"
+
+extern int box_get_jal(int i);
+extern int box_get_cjalr(int i);
+extern int box_get_ccall(int i);
+extern int box_get_user(int i);
+extern char __box_start;
+extern char __box_size;
+extern void __writeString(char* s);
+extern void __writeHex(unsigned long long n);
+extern void __writeDigit(unsigned long long n);
+
+// Just create some space outputs based a a value so that the value can't be
+// optimised away.
+int spaceOut(int val)
+{
+  for (val=val; val>0; val-=10000) {
+    if ((val % 100000)==0) __writeString(" ");
+  }
+}
+
+int write2DecimalDigit(int val)
+{
+  __writeDigit(val/100);
+  __writeString( ".");
+  __writeDigit(val%100);
+}
+
+int armArray()
+{
+	int i, sum;
+	long long time;
+	long long mean = 0;
+	// Enough space for 1 aligned capability, and then align it.
+	long long spotA[12];
+	void * boxCap = &spotA;
+	boxCap = (void *)((long long)boxCap & ~0x1F) + 32;
+	long long spotB[12];
+	void * boxCapSealed = &spotB;
+	boxCapSealed = (void *)((long long)boxCapSealed & ~0x1F) + 32;
+	long long spotC[12];
+  void * retCapSealed = &spotC;
+  retCapSealed = (void *)((long long)retCapSealed & ~0x1F) + 32;
+  
+  long long context[160];
+	// ------- boxCap is the aligned pointer --------
+	int requestStart, requestEnd;
+	
+	sum = 0;
+  requestStart = getCount();
+	for (i = 0; i < DCRUNS; i++) {
+	  safeCall1(1, getCount, &context, 0);
+	  //sum += getCount();
+	}
+	requestEnd = getCount();
+	spaceOut(sum);
+	time = (requestEnd - requestStart);
+	mean = time/(DCRUNS/100);
+	//write2DecimalDigit(mean);
+	__writeString( "\t Context Save & Restore\n");
+	
+	/* ********** Access array directly, no protection ************************ */
+	sum = 0;
+	requestStart = getCount();
+	for (i = 0; i < DCRUNS; i++) {
+		sum += box_get_jal(i);
+	}
+	requestEnd = getCount();
+	spaceOut(sum);
+	time = (requestEnd - requestStart);
+	mean = time/(DCRUNS/100);
+	write2DecimalDigit(mean);
+	__writeString( "\t Direct\n");
+	
+	/* ********** Access array in sandbox but not secure ********************** 
+	makeSandbox(&__box_start, (long long)&__box_size, boxCap);
+	sum = 0;
+	long long box_get_offset = ((long long)&box_get_cjalr)-((long long) &__box_start);
+	asm volatile("CLC $c1, %0, 0($c0)": : "r" (boxCap));
+	requestStart = getCount();
+	for (i = 0; i < DCRUNS; i++) {
+		sum += jumpSandbox(boxCap, box_get_offset, i);
+	}
+	requestEnd = getCount();
+	spaceOut(sum);
+	time = (requestEnd - requestStart);
+	mean = time/(DCRUNS/100);
+	write2DecimalDigit(mean);
+	__writeString( "\t C0 Constrained\n");
+	*/
+	/* ********** Access array in secure sandbox ********************** 
+	invCapRegs();
+	long long box_get_ccall_offset = ((long long)&box_get_ccall)-((long long) &__box_start);
+	makeSealedCaps(&__box_start, (long long)&__box_size, box_get_ccall_offset, boxCapSealed, 0xffff);
+	asm volatile("CLC $c5, %0, 0($c0)": : "r" (boxCapSealed));
+	asm volatile("CLC $c6, %0, 32($c0)": : "r" (boxCapSealed));
+	void * returnAddr;
+	asm volatile("dla %0, ccallReturn": "=r" (returnAddr));
+  makeSealedCaps((void *)0, -1, (long long)returnAddr, retCapSealed, 0xffff);
+  asm volatile("CLC $c1, %0, 0($c0)": : "r" (retCapSealed));
+	asm volatile("CLC $c2, %0, 32($c0)": : "r" (retCapSealed));
+	sum = 0;
+	requestStart = getCount();
+	for (i = 0; i < DCRUNS; i++) {
+		sum += jumpSealedSandbox(boxCapSealed, box_get_offset, i);
+	}
+	requestEnd = getCount();
+	spaceOut(sum);
+	time = (requestEnd - requestStart);
+	mean = time/(DCRUNS/100);
+	write2DecimalDigit(mean);
+	__writeString( "\t CCall\n");
+	*/
+	/* ********** Access array in userspace sandbox ********************** */
+	void * userBoxAddr = (void *)(((long long)&box_get_user) & 0x00000000FFFFFFFF); 
+	// Get "physical" address, which is a translated address.
+	sum = 0;
+	requestStart = getCount();
+	for (i = 0; i < DCRUNS; i++) {
+		sum += jumpUserSandbox(i, userBoxAddr);
+	}
+	requestEnd = getCount();
+	spaceOut(sum);
+	time = (requestEnd - requestStart);
+	mean = time/(DCRUNS/100);
+	write2DecimalDigit(mean);
+	__writeString( "\t Userspace\n");
+	
+	/* ********** Access array in userspace sandbox with integrity. ********************** */ 
+	// Get "physical" address, which is a translated address.
+	sum = 0;
+	requestStart = getCount();
+	for (i = 0; i < DCRUNS; i++) {
+		sum += jumpUserSandboxIntegrity(i, userBoxAddr);
+	}
+	requestEnd = getCount();
+	spaceOut(sum);
+	time = (requestEnd - requestStart);
+	mean = time/(DCRUNS/100);
+	write2DecimalDigit(mean);
+	__writeString( "\t Userspace with Integrity\n");
+	
+	/* ********** Access array in userspace sandbox with Confidentiality ********************** */
+	// Get "physical" address, which is a translated address.
+	sum = 0;
+	requestStart = getCount();
+	for (i = 0; i < DCRUNS; i++) {
+		sum += jumpUserSandboxConfidentiality(i, userBoxAddr);
+	}
+	requestEnd = getCount();
+	spaceOut(sum);
+	time = (requestEnd - requestStart);
+	mean = time/(DCRUNS/100);
+	write2DecimalDigit(mean);
+	__writeString( "\t Userspace with Confidentiality\n");
+	
+	/* ********** Access array directly with Integrity ************************ */
+	sum = 0;
+	requestStart = getCount();
+	for (i = 0; i < DCRUNS; i++) {
+		sum += safeCall1(i, box_get_jal, &context, 0);
+	}
+	requestEnd = getCount();
+	spaceOut(sum);
+	time = (requestEnd - requestStart);
+	mean = time/(DCRUNS/100);
+	write2DecimalDigit(mean);
+	__writeString( "\t Direct with RegSafe\n");
+	
+	/* ********** Access array in sandbox but not secure +regSafe ********************** 
+	sum = 0;
+	box_get_offset = ((long long)&box_get_cjalr)-((long long) &__box_start);
+	asm volatile("CLC $c1, %0, 0($c0)": : "r" (boxCap));
+	requestStart = getCount();
+	for (i = 0; i < DCRUNS; i++) {
+		sum += safeCall3(boxCap, box_get_offset, i, jumpSandbox, &context, 1);
+	}
+	requestEnd = getCount();
+	spaceOut(sum);
+	time = (requestEnd - requestStart);
+	mean = time/(DCRUNS/100);
+	write2DecimalDigit(mean);
+	__writeString( "\t C0 Constrained with RegSafe\n");
+	*/
+	/* ********** Access array in secure sandbox +regSafe ********************** 
+	invCapRegs();
+	box_get_ccall_offset = ((long long)&box_get_ccall)-((long long) &__box_start);
+	makeSealedCaps(&__box_start, (long long)&__box_size, box_get_ccall_offset, boxCapSealed, 0x7fff);
+	asm volatile("CLC $c5, %0, 0($c0)": : "r" (boxCapSealed));
+	asm volatile("CLC $c6, %0, 32($c0)": : "r" (boxCapSealed));
+	asm volatile("dla %0, ccallReturn": "=r" (returnAddr));
+  makeSealedCaps((void *)0, -1, (long long)returnAddr, retCapSealed, 0xffff);
+  asm volatile("CLC $c1, %0, 0($c0)": : "r" (retCapSealed));
+	asm volatile("CLC $c2, %0, 32($c0)": : "r" (retCapSealed));
+	sum = 0;
+	requestStart = getCount();
+	for (i = 0; i < DCRUNS; i++) {
+		sum += safeCall3(boxCapSealed, box_get_offset, i, jumpSealedSandbox, &context, 1);
+	}
+	requestEnd = getCount();
+	spaceOut(sum);
+	time = (requestEnd - requestStart);
+	mean = time/(DCRUNS/100);
+	write2DecimalDigit(mean);
+	__writeString( "\t CCall with RegSafe\n");
+	*/
+	return 0;
+}

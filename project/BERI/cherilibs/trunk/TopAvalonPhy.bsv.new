@@ -1,0 +1,300 @@
+/*-
+ * Copyright (c) 2013 Simon W. Moore
+ * Copyright (c) 2013 Philip Withnall <philip.withnall@cantab.net>
+ * Copyright (c) 2013 Jonathan Woodruff
+ * Copyright (c) 2013 Robert M. Norton
+ * All rights reserved.
+*/
+package TopAvalonPhy;
+
+import BRAM :: *;
+import Clocks::*;
+import FIFO::*;
+import FIFOF::*;
+import FIFOLevel::*;
+import SpecialFIFOs::*;
+import GetPut::*;
+import ClientServer::*;
+import Connectable::*;
+
+import AvalonMaster :: *;
+import AvalonStreaming :: *;
+
+import DebugModule::*;
+import TraceUnit::*;
+import Debug::*;
+import Processor::*;
+import ExtMem::*;
+import Peripheral::*;
+import ExtMemBuffer::*;
+
+import AvalonBurstMaster::*;
+import CompositorPhy::*;
+import CompositorUtils::*;
+
+import Proc::*; // will get either cheri or cheri2 version
+`include "parameters.bsv"
+
+`ifdef MULTI
+import MemTypes::*;
+import Vector::*;
+`endif
+
+// Type for avalon bus data
+typedef Bit#(256) AvalonWordT;
+typedef Bit#(32)  AvalonByteEnableT;
+typedef Bit#(256) ReturnedData256T;
+
+// Structure for memory requests
+typedef struct {
+  Bool  write;
+  Bit#(word_address_width)  addr; // word address
+  AvalonWordT  data;
+  AvalonByteEnableT byteenable;
+  Bool cached;
+  } MemAccessPacket256T#(numeric type word_address_width) deriving(Bits,Eq);
+
+// Avalon Master Interface - pipelined version
+//  - partially working - really need "flush" signal
+// notes:
+//  - all methods are ready and enabled
+//  - names are chosen to match what SOPC builder expects for variable names
+//   in the Verilog code - don't change!
+//  - initally a long latency (too much buffering?) but (hopfully) robust
+//   design remove some latch stages in the future
+
+(* always_ready, always_enabled *)
+interface AvalonPipelinedMaster256beIfc#(numeric type word_address_width);
+  (* prefix = "" *)
+  method Action m0(AvalonWordT readdata, Bool readdatavalid, Bool waitrequest);
+  method Action irq(Bit#(32) irqs);
+  method AvalonWordT writedata;
+  method Bit#(TAdd#(5,word_address_width)) address;
+  method Bool read;
+  method Bool write;
+  method AvalonByteEnableT byteenable;
+  method Bool reset_n_out;
+endinterface
+
+interface BeriPhysicalIfc#(numeric type word_address_width);
+  interface AvalonMasterExt#(Bit#(256),Bit#(word_address_width),3,32) avm;
+  `ifndef MULTI
+    interface AvalonStreamSinkPhysicalIfc#(Bit#(8)) debugStreamSink;
+    interface AvalonStreamSourcePhysicalIfc#(Bit#(8)) debugStreamSource;
+  `else
+    interface Vector#(MULTICORE, AvalonStreamSinkPhysicalIfc#(Bit#(8))) debugStreamSink;
+    interface Vector#(MULTICORE, AvalonStreamSourcePhysicalIfc#(Bit#(8))) debugStreamSource;
+  `endif
+  interface AvalonPipelinedMasterIfc#(27) avm_compositor; /* Avalon bus master connection for compositor DMA */
+  interface AvalonPacketStreamSourcePhysicalIfc#(SizeOf#(RgbPixel)) compositorPixelsOut; /* Avalon stream for compositor's outputted pixels */
+  `ifdef TRACE
+  interface TraceMaster avm_debug;
+  `endif
+endinterface
+
+function Bit#(selectSize) select(Bit#(lineSize) line, Bit#(lineAddrSize) addr)
+  provisos(Log#(lineSize, lineAddrSize));
+
+  Integer i;
+  Integer selectSizeI = valueOf(selectSize);
+
+  Bit#(selectSize) result = ?;
+
+  for(i = 0;i < valueOf(lineSize); i = i + selectSizeI) begin
+    if(addr == fromInteger(i)) begin
+      result = line[i + selectSizeI - 1 : i];
+    end
+  end
+
+  return result;
+endfunction
+
+typedef enum {  
+   BUS_AVALON,
+   BUS_BLUE,
+   BUS_BRAM
+} Bus deriving (Bits, Eq);
+
+(* synthesize, options = "-O",
+  reset_prefix = "csi_clockreset_reset_n",
+  clock_prefix = "csi_clockreset_clk" *)
+module mkTopAvalonPhy
+    ((* osc="csi_compositor_clk" *) Clock compositorClock,
+     (* reset="csi_compositor_reset_n" *) Reset compositorReset,
+     BeriPhysicalIfc#(35) defaultIfc);
+
+    let physical <- runDebug(mkDebugTopAvalon(compositorClock, compositorReset));
+    return physical;
+endmodule
+                      
+module [DebugModule] mkDebugTopAvalon((* osc="csi_compositor_clk" *) Clock compositorClock,
+                      (* reset="csi_compositor_reset_n" *) Reset compositorReset,
+                      BeriPhysicalIfc#(35) defaultIfc);
+                      
+  FIFO#(Bus)               bus_reads       <- mkSizedFIFO(8);
+  Reg#(Bit#(32))           avalonIrqs      <- mkReg(32'b0);
+  Processor                beri            <- mkCheri();
+  AvalonMaster#(Bit#(256),Bit#(35),3,32) avalon <- mkAvalonMaster();
+  ExtMemBuffer             buffer          <- mkExtMemBuffer();
+
+  /* If CHERI_COMPOSITOR is not defined, mkCompositorPhy is a dummy module. */
+/*  CompositorPhyIfc       compositor      <- mkCompositorPhy(clocked_by compositorClock, reset_by compositorReset);*/
+  CompositorPhyIfc         compositor      <- mkCompositorPhy();
+/*  Peripheral#(1)           compositorSync  <- mkAsyncPeripheral(compositorClock, compositorReset, compositor.regs);*/
+
+  `ifndef MULTI  
+    PerifBus               blueBus         <- mkBlueBus(beri.pic, compositor.regs);
+    AvalonStreamSinkIfc#(Bit#(8)) streamIn  <- mkAvalonStreamSink2Get();
+    AvalonStreamSourceIfc#(Bit#(8)) streamOut <- mkPut2AvalonStreamSource();
+  `else
+    PerifBus#(MULTICORE)   blueBus         <- mkBlueBus(beri.pic, compositor.regs);
+    Vector#(MULTICORE, AvalonStreamSinkIfc#(Bit#(8))) streamIn  <- replicateM(mkAvalonStreamSink2Get);
+    Vector#(MULTICORE, AvalonStreamSourceIfc#(Bit#(8))) streamOut <- replicateM(mkPut2AvalonStreamSource);
+  `endif
+
+/* FIXME: This probably doesn't work yet; hooking the compositor up with it
+ * causes either the Avalon memory bus, or Bluebus, to lock up. */
+/*  Server2AvalonPipelinedMasterIfc#(27) avalonMaster <- mkServer2AvalonPipelinedMaster(clocked_by compositorClock, reset_by compositorReset);
+  AvalonPacketStreamSourceIfc#(RgbPixel) pixelStream <- mkPut2AvalonPacketStreamSource(clocked_by compositorClock, reset_by compositorReset);*/
+  Server2AvalonPipelinedMasterIfc#(27) avalonMaster <- mkServer2AvalonPipelinedMaster();
+  AvalonPacketStreamSourceIfc#(RgbPixel) pixelStream <- mkPut2AvalonPacketStreamSource();
+
+  // 32k boot memory loaded with initial program.
+  ExtMem bootMem <- mkExtMem;
+
+  let traceUnit <- mkTraceUnit(beri.traceControl);
+  
+  // Get a request from beri and forward it to the appropriate bus.
+  // Sadly this requires both buses to be ready...
+  rule getRequest;
+    ExtMemReq#(35, 32) packet <- beri.extMemory.request.get();
+    let is_blue_addr = (packet.addr & zeroExtend(`BLUE_BUS_MASK)) == zeroExtend(`BLUE_BUS_BASE);
+    
+    // Default to Avalon bus
+    Bus bus = BUS_AVALON;
+    // Use internal Blue bus if the address matches the base and mask
+    if ((packet.addr & zeroExtend(`BLUE_BUS_MASK)) == zeroExtend(`BLUE_BUS_BASE)) bus = BUS_BLUE;
+    // Use internal boot rom if the address matches the base and mask 
+    // (we don't use blue bus for the ROM because we want a 256-bit interface for simplicity).
+    if ((packet.addr & zeroExtend(`BERI_ROM_MASK)) == zeroExtend(`BERI_ROM_BASE)) bus = BUS_BRAM;
+    case (bus)
+      BUS_AVALON: buffer.server.req(packet);
+      BUS_BLUE: blueBus.memIfc.request.put(packet);
+      BUS_BRAM: bootMem.req(packet);
+    endcase
+    if(packet.op == EMR_Read)
+      bus_reads.enq(bus);
+  endrule
+  
+  rule bufferToAvalon;
+    let r <- buffer.client.request.get();
+    if (r.op == EMR_Write) avalon.write(r.addr,r.data,unpack(r.byteEnable));
+    else if (r.cached) avalon.burstRead(4,r.addr,unpack(r.byteEnable));
+    else avalon.burstRead(1,r.addr,unpack(r.byteEnable));
+  endrule
+  rule avalonToBuffer;
+    let r <- avalon.get();
+    buffer.client.response.put(r);
+  endrule
+  
+  rule enqResponseAvalon (bus_reads.first() == BUS_AVALON);
+    let r <- buffer.resp();
+    bus_reads.deq;
+    beri.extMemory.response.put(r);
+  endrule
+
+  rule enqResponseBlue (bus_reads.first() == BUS_BLUE);
+    let r <- blueBus.memIfc.response.get();
+    bus_reads.deq;
+    beri.extMemory.response.put(r);
+  endrule
+  
+  rule enqResponseBram (bus_reads.first() == BUS_BRAM);
+    ReturnedData256T r <- bootMem.resp();
+    bus_reads.deq;
+    beri.extMemory.response.put(r);
+  endrule
+
+  `ifndef MULTI  
+    rule debugIn;
+      Bit#(8) char <- streamIn.rx.get();
+      beri.debugStream.request.put(char);
+    endrule
+  
+    rule debugOut;
+      Bit#(8) char <- beri.debugStream.response.get();
+      streamOut.tx.put(char);
+    endrule
+  `else
+    for (Integer i=0; i<valueof(MULTICORE); i=i+1) begin
+      rule debugIn;
+        Bit#(8) char <- streamIn[i].rx.get();
+        beri.debugStream[i].request.put(char);
+      endrule
+ 
+      rule debugOut;
+        Bit#(8) char <- beri.debugStream[i].response.get();
+        streamOut[i].tx.put(char);
+      endrule
+    end
+  `endif
+
+  (* fire_when_enabled, no_implicit_conditions*)
+  rule irqFeedThrough;
+    avalonIrqs <= avalon.getIrqs();
+    let blueBusIrqs = blueBus.getIrqs();
+    beri.putIrqs(avalonIrqs | blueBusIrqs);
+  endrule
+
+  /* Connect up interfaces. */
+  mkConnection(compositor.pixelsOut, pixelStream.tx);
+
+  /* Connect up the compositor's external memory interface.
+   * TODO: Until the compositor is connected to its own DRAM controller, we need to add an offset to all addresses it accesses, so we don't collide
+   * with system memory accesses. (Yes, this is hacky.)
+   * Note that the offset has to be chosen to be below 0x4000_0000 (which is the
+   * top of DRAM) by some margin to allow for the tag bits which are stored at
+   * the top of memory.
+   * Ideally, this would just be: mkConnection(compositor.extMemory, avalonMaster.server); */
+  rule compositorExtMemoryRequest;
+    let req <- compositor.extMemory.request.get();
+    req.addr = unpack(pack(req.addr) | 27'h1000000);
+    avalonMaster.server.request.put(req);
+  endrule: compositorExtMemoryRequest
+
+  rule compositorExtMemoryResponse;
+    let resp <- avalonMaster.server.response.get();
+    compositor.extMemory.response.put(resp);
+  endrule: compositorExtMemoryResponse
+
+  `ifdef MULTI
+    Vector#(MULTICORE, AvalonStreamSinkPhysicalIfc#(Bit#(8))) streamSink;
+    Vector#(MULTICORE, AvalonStreamSourcePhysicalIfc#(Bit#(8))) streamSource;
+
+    for (Integer i=0; i<valueof(MULTICORE); i=i+1) begin
+      streamSink[i] = streamIn[i].physical;
+      streamSource[i] = streamOut[i].physical;
+    end
+  `endif
+
+  // Avalon master interface - just wiring
+  interface avm = avalon.avm;
+
+  `ifndef MULTI  
+    interface debugStreamSink = streamIn.physical;
+    interface debugStreamSource = streamOut.physical;
+  `else
+    interface debugStreamSink = streamSink;
+    interface debugStreamSource = streamSource;
+  `endif
+
+  interface avm_compositor = avalonMaster.avm;
+  interface compositorPixelsOut = pixelStream.physical;
+  /* TODO: Tidy up the compositor inclusion and update Qsys to remove it there. */
+
+  `ifdef TRACE
+  interface avm_debug = traceUnit;
+  `endif
+endmodule
+
+endpackage

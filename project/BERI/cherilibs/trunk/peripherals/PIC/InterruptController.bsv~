@@ -1,0 +1,100 @@
+/***********************************************************************
+This module is responsible for allocating a unique ID to any core that
+sends a request. The request is sent by one of the CP0 registers whenever
+a core is booted.
+It is also used as a global interrupt controller.
+Currently more improvements are made to this module in order to enable
+more sophisticated abilities. 
+=========================================================================
+Alan Mujumdar, November 2012
+************************************************************************/
+
+package InterruptController;
+
+import MIPS::*;
+import ClientServer::*;
+import GetPut::*;
+import Vector::*;
+
+interface InterruptControllerIfc;
+  interface Server#(ProcIDRequest, ProcIDResponse) procID; 
+  interface Server#(InterruptRequest, InterruptResponse) accessIRC;
+endinterface
+
+  module mkInterruptController(InterruptControllerIfc);
+
+    ProcIDResponse defaultProcIDResponse = ProcIDResponse{virtualAddr: 0, 
+							  realAddr: 0};
+
+    ProcIDRequest defaultProcIDRequest = ProcIDRequest{realAddr:0};
+
+    InterruptRequest defaultInterruptRequest = InterruptRequest{virtualAddr: 0,
+								realAddr: 0,
+								interrupt: 0};
+
+    InterruptResponse defaultInterruptResponse = InterruptResponse{virtualAddr: 0,
+								   realAddr: 0,
+								   interrupt: 0};
+
+    Reg#(ProcIDResponse) resProcID <- mkReg(defaultProcIDResponse);
+    Reg#(ProcIDRequest) reqProcID <- mkReg(defaultProcIDRequest);
+    Reg#(InterruptRequest) reqIRC <- mkReg(defaultInterruptRequest);
+    Reg#(InterruptResponse) resIRC <- mkReg(defaultInterruptResponse);
+    Reg#(Bit#(24)) virtual_number <- mkReg(0);
+    Reg#(Bit#(8)) procid <- mkReg(8'b11111111);
+    Reg#(Vector#(256, Bit#(8))) storeProcIRC <- mkReg(replicate(0));
+    Reg#(Bit#(8)) accessCount <- mkReg(0);
+
+    rule interruptConnect;
+      resIRC <= InterruptResponse{virtualAddr: reqIRC.virtualAddr,
+				  realAddr: storeProcIRC[reqIRC.realAddr],
+				  interrupt: reqIRC.interrupt};
+    endrule
+
+    interface Server procID;
+      interface Get response;
+	method ActionValue#(ProcIDResponse) get();
+	  procid <= procid - 10;
+          resProcID <= ProcIDResponse{virtualAddr: virtual_number,
+                                      realAddr: procid};
+	  storeProcIRC[resProcID.realAddr] <= accessCount;
+	  accessCount <= accessCount + 1; 
+          debug($display("PutProcID Generator <%d> /%d/", resProcID, accessCount));
+	  return resProcID;
+	endmethod
+      endinterface
+      interface Put request;
+	method Action put(ProcIDRequest req);
+	  reqProcID <= req;
+          debug($display("GetProcID Generator <%d>", req));
+	endmethod
+      endinterface
+    endinterface
+
+    interface Server accessIRC;
+      interface Get response;
+        method ActionValue#(InterruptResponse) get();
+	  debug($display("GetIRC Generator    <%d>", resIRC));
+	  return resIRC;
+        endmethod
+      endinterface
+      interface Put request;
+	method Action put(InterruptRequest req);
+	  reqIRC <= req;
+	  debug($display("PutIRC Generator    <%d>", reqIRC));	
+	endmethod
+      endinterface
+    endinterface
+
+  endmodule
+
+endpackage
+
+/*
+	  //Pseudo random number generator
+	  prn <= reqProcID.realAddr;
+	  prn[7] <= (prn[7]^prn[5])^(prn[4]^prn[3]);
+	  prn[0] <= prn[0]^prn[7];
+	  prn[6:1] <= prn[5:0];
+*/
+

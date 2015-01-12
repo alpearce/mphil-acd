@@ -1,0 +1,614 @@
+/*-
+ * Copyright (c) 2012 Simon W. Moore
+ * Copyright (c) 2012 Jonathan Woodruff
+ * All rights reserved.
+ *
+ * This software was developed by SRI International and the University of
+ * Cambridge Computer Laboratory under DARPA/AFRL contract FA8750-10-C-0237
+ * ("CTSRD"), as part of the DARPA CRASH research programme.
+ *
+ * @BERI_LICENSE_HEADER_START@
+ *
+ * Licensed to BERI Open Systems C.I.C. (BERI) under one or more contributor
+ * license agreements.  See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.  BERI licenses this
+ * file to you under the BERI Hardware-Software License, Version 1.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at:
+ *
+ *   http://www.beri-open-systems.org/legal/license-1-0.txt
+ *
+ * Unless required by applicable law or agreed to in writing, Work distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ * @BERI_LICENSE_HEADER_END@
+ */
+
+/*****************************************************************************
+
+ MTL_Framebuffer
+ ===============
+ 
+ Provides a memory mapped frame buffer for the Terasic MTL-LCD (7" multitouch
+ screen).  Uses the DE4 off-chip SSRAM to store the frame buffer.  Provides
+ an Avalon memory mapped interface to allow a processor to write to the
+ SSRAM.
+ 
+ Pixel data is output to an Avalon Stream which needs to be connected to the
+ MTL_LCD_Driver in Qsys.  The MTL_LCD_Driver must run at the pixel clock rate
+ of 33MHz and this framebuffer must run at at least 100MHz to ensure there
+ is enough memory bandwidth.
+ 
+ Tested at 100MHz.  Should run faster though there may become timing issues
+ with the external SSRAM, though this appears to be good to 200MHz.
+ 
+ *****************************************************************************/
+
+package MTL_Framebuffer;
+
+import FIFO::*;
+import FIFOF::*;
+import SpecialFIFOs::*;
+import GetPut::*;
+import Vector::*;
+import ClientServer::*;
+import Connectable::*;
+import AlteraROM::*;
+import AvalonStreaming::*;
+import Avalon2ClientServer::*;
+
+// word address width
+//  - top bit indicates if the message is for SSRAM (=0) or configuration (=1)
+typedef 21 WordAddrWidth;
+
+
+// all of the ssram physical signals *except the clock which must be sourced directly*
+(* always_ready, always_enabled *)
+interface SSRAMPhy;
+  method Bool ssram_adv;
+  method Bool ssram_bwa_n;
+  method Bool ssram_bwb_n;
+  method Bool ssram_ce_n;
+  method Bool ssram_cke_n;
+  method Bool ssram_oe_n;
+  method Bool ssram_we_n;
+  method Bit#(24) fsm_a; // address shared with the Flash
+  method Bit#(16) fsm_d_out; // data (output) shared with Flash
+  method Action fsm_d(Bit#(16) in); // data (input)
+  method Bool fsm_dout_req; // write enable (not) for the shared data bus    
+endinterface
+
+// memory access structure
+// TODO: make Avalon2ClientServer MemAccessPacketT generic and then use that
+typedef struct {
+   Bool     writeenable;
+   Bit#(2)  byteenable;
+   Bit#(20) addr;
+   Bit#(16) data;
+} SRAMAccessT deriving (Bits,Eq);
+
+
+typedef struct {
+   Bool     writeenable;
+   Bit#(4)  byteenable;
+   Bit#(19) addr;
+   Bit#(32) data;
+} SRAMAccess32bT deriving (Bits,Eq);
+
+
+interface SSRAMIfc;
+  interface Server#(SRAMAccessT,Maybe#(Bit#(16))) server;
+  interface SSRAMPhy phy;
+endinterface
+  
+
+module mkSSRAMController(SSRAMIfc);
+  Wire#(Bit#(2)) ssram_byteenable_w <- mkDWire(2'b00); // default to no bytes
+  Wire#(Bool)         ssram_we_n_dw <- mkDWire(True);  // default to read
+  Wire#(Bit#(24))           fsm_a_w <- mkDWire(0);     // TODO: how to avoid default here?
+  Reg#(Bit#(16))         fsm_dout_w <- mkDWire(16'hdead);     // TODO: how to avoid default here?
+  Wire#(Bit#(16))         fsm_din_w <- mkBypassWire;
+  Wire#(Bool)        fsm_dout_req_w <- mkDWire(False); // default to no write
+
+  FIFO#(SRAMAccessT)            req <- mkLFIFO;
+  FIFO#(Maybe#(Bit#(16)))      resp <- mkLFIFO;
+  FIFO#(Maybe#(Bit#(16)))     pipe0 <- mkLFIFO;
+  FIFO#(Maybe#(Bit#(16)))     pipe1 <- mkLFIFO;
+  FIFO#(Maybe#(Bit#(16)))     pipe2 <- mkLFIFO;
+  
+  rule forward_requests;
+    fsm_a_w            <= zeroExtend(req.first.addr);
+//    fsm_dout_w         <= req.first.data;
+    ssram_byteenable_w <= req.first.byteenable;
+    ssram_we_n_dw      <= !req.first.writeenable;
+    
+    pipe0.enq(req.first.writeenable ? tagged Valid req.first.data : tagged Invalid);
+    req.deq;
+  endrule
+
+  rule pipe_stage_0;
+    pipe1.enq(pipe0.first);
+    pipe0.deq;
+  endrule
+  
+  rule pipe_stage_1;
+    Bool we = isValid(pipe1.first);
+    fsm_dout_req_w <= we;
+    fsm_dout_w     <= fromMaybe(16'heeee,pipe1.first);
+    pipe2.enq(pipe1.first);
+    pipe1.deq;
+  endrule
+  
+  rule pipe_stage_2;
+    Bool we = isValid(pipe2.first);
+    resp.enq(we ? tagged Invalid : tagged Valid fsm_din_w);
+    pipe2.deq;
+  endrule
+  
+  interface Server server;
+    interface Put request  = toPut(req);
+    interface Get response = toGet(resp);
+  endinterface
+  
+  interface SSRAMPhy phy;
+    method Bool ssram_adv;     return False;                    endmethod
+    method Bool ssram_bwa_n;   return ssram_byteenable_w[0]!=1; endmethod
+    method Bool ssram_bwb_n;   return ssram_byteenable_w[1]!=1; endmethod
+    method Bool ssram_ce_n;    return False;                    endmethod
+    method Bool ssram_cke_n;   return False;                    endmethod
+    method Bool ssram_oe_n;    return fsm_dout_req_w;           endmethod
+    method Bool ssram_we_n;    return ssram_we_n_dw;            endmethod
+    method Bit#(24) fsm_a;     return fsm_a_w;                  endmethod
+    method Bit#(16) fsm_d_out; return fsm_dout_w;               endmethod
+    method Bool fsm_dout_req;  return fsm_dout_req_w;           endmethod
+
+    method Action fsm_d(Bit#(16) in);
+      fsm_din_w <= in;
+    endmethod
+  endinterface
+  
+endmodule
+
+/*
+module mkSSRAMControllerSlowWrite(SSRAMIfc);
+  Wire#(Bit#(2)) ssram_byteenable_w <- mkDWire(2'b00);        // default to no bytes
+  Wire#(Bool)         ssram_we_n_dw <- mkDWire(True);         // default to read
+  Wire#(Bit#(24))           fsm_a_w <- mkDWire(0);            // TODO: how to avoid default here?
+  Reg#(Bit#(16))         fsm_dout_w <- mkDWire(16'hdead);     // TODO: how to avoid default here?
+  Wire#(Bit#(16))         fsm_din_w <- mkBypassWire;
+  Wire#(Bool)        fsm_dout_req_w <- mkDWire(False);        // default to no write
+
+  FIFOF#(SRAMAccessT)           req <- mkGLFIFOF(False,True); // ungarded deq
+  FIFOF#(Maybe#(Bit#(16)))     resp <- mkGLFIFOF(True,False); // ungarded enq
+  Reg#(Bit#(3))         read_timing <- mkReg(0);
+  Reg#(Bit#(3))        write_timing <- mkReg(0);
+
+  // TODO: at present data from SSRAM gets dropped on the floor if resp FIFO blocks
+  //       - use clock enable to SSRAM to wait?
+  //       - at the moment the frame buffer which uses this guarantees that resp FIFO has space
+  (* no_implicit_conditions, fire_when_enabled *)
+  rule forward_requests;
+    Bool doread  = False;
+    Bool dowrite = False;
+    if(req.notEmpty)
+      begin
+        fsm_a_w            <= zeroExtend(req.first.addr);
+        ssram_byteenable_w <= req.first.byteenable;
+        doread              = !req.first.writeenable;
+        dowrite             = req.first.writeenable && (read_timing==0); // complete reads before starting a write sequence
+        ssram_we_n_dw      <= !(dowrite && (write_timing==0));
+        if(dowrite)
+          fsm_dout_w <= req.first.data;
+      end
+
+    Bool write_seq_end = write_timing == ~0;
+    fsm_dout_req_w <= dowrite; // dowrite && !write_seq_end; //write_timing!=0;
+    write_timing   <= write_seq_end ? 0 : (write_timing<<1) | (dowrite ? 1 : 0);
+    read_timing    <= (read_timing<<1) | (doread  ? 1 : 0);
+
+    if(write_seq_end)
+      resp.enq(tagged Invalid); // response to write completed
+    else if(read_timing[2]==1)
+      resp.enq(tagged Valid fsm_din_w); // response to read completed
+    if(write_seq_end || doread)
+      req.deq;
+  endrule
+  
+  interface Server server;
+    interface Put request  = toPut(req);
+    interface Get response = toGet(resp);
+  endinterface
+  
+  interface SSRAMPhy phy;
+    method Bool ssram_adv;     return False;                    endmethod
+    method Bool ssram_bwa_n;   return ssram_byteenable_w[0]!=1; endmethod
+    method Bool ssram_bwb_n;   return ssram_byteenable_w[1]!=1; endmethod
+    method Bool ssram_ce_n;    return False;                    endmethod
+    method Bool ssram_cke_n;   return False;                    endmethod
+    method Bool ssram_oe_n;    return fsm_dout_req_w;           endmethod
+    method Bool ssram_we_n;    return ssram_we_n_dw;            endmethod
+    method Bit#(24) fsm_a;     return fsm_a_w;                  endmethod
+    method Bit#(16) fsm_d_out; return fsm_dout_w;               endmethod
+    method Bool fsm_dout_req;  return fsm_dout_req_w;           endmethod
+
+    method Action fsm_d(Bit#(16) in);
+      fsm_din_w <= in;
+    endmethod
+  endinterface
+  
+endmodule
+*/
+
+
+
+/*****************************************************************************
+ * Pixel engine
+ * ------------
+ * 
+ * Requests pixel data from the frame buffer and then forwards the pixel
+ * over an Avalon Streaming interface.  This streamed data needs to be fed
+ * to the MTL_LCD_Driver in Qsys.  Note that the MTL_LCD_Driver runs at
+ * the pixel clock rate of 33MHz and the intention is that this module runs
+ * at at least 100MHz in order to keep up.
+ *****************************************************************************/
+
+interface MTL_PixelEngine;
+  // interface for ssram 
+  interface Client#(SRAMAccess32bT,Bit#(32)) ssram_access;
+  // interface to pixel output stream
+  interface AvalonPacketStreamSourcePhysicalIfc#(24) aso;
+  method Action writeCharFgColour(Bit#(32) col);
+  method Action writeCharBgColour(Bit#(32) col);
+  method Action writeCharBaseAddr(Bit#(19) a);
+  method ActionValue#(Bit#(32)) readCharFgColour;
+  method ActionValue#(Bit#(32)) readCharBgColour;
+  method ActionValue#(Bit#(19)) readCharBaseAddr;
+endinterface
+
+
+typedef struct {
+   Bool first;
+   Bool last;
+   } PixPosT deriving (Bits,Eq);
+
+typedef struct {
+   Bit#(1) flashing;
+   Bit#(3) bgcol;
+   Bit#(4) fgcol;
+   Bit#(8) char;                
+   } VGA_charT deriving (Bits,Eq);
+
+module mkMTL_PixelEngine(MTL_PixelEngine);
+  
+  function Bit#(8) satMinus(Bit#(8) a, Bit#(8) b);
+    Bit#(9) minus = zeroExtend(a) - zeroExtend(b);
+    return msb(minus)==1 ? 0 : truncate(minus);
+  endfunction
+  
+  function Bit#(8) satPlus(Bit#(8) a, Bit#(8) b);
+    Bit#(9) sum = zeroExtend(a) + zeroExtend(b);
+    return msb(sum)==1 ? 8'hff : truncate(sum);
+  endfunction
+  
+  let xres = 800;  // X resolution
+  let yres = 480;  // Y resolution
+  let addr_range = 800*480;
+  let total_chars = 100*30;
+  AvalonPacketStreamSourceIfc#(Bit#(24))
+                             lcd_stream <- mkPut2AvalonPacketStreamSource;
+  FIFO#(SRAMAccess32bT)       ssram_req <- mkLFIFO;
+  
+  // for pixel rendering
+  Reg#(Bit#(19))                   addr <- mkReg(0); // word address
+  FIFO#(Bit#(32))            ssram_resp <- mkSizedFIFO(8);
+  FIFO#(PixPosT)                 pixpos <- mkSizedFIFO(8);
+  FIFO#(Bool)                chars_read <- mkSizedFIFO(8);
+  
+  // for character rendering
+  Server#(UInt#(11),UInt#(8))   fontrom <- mkAlteraROMServer("fontrom.mif");
+  FIFO#(UInt#(8))              fontbits <- mkFIFO;
+  Reg#(Bit#(19))              char_addr <- mkReg(addr_range); // word address at default starting point
+  FIFO#(Vector#(2,VGA_charT)) two_chars <- mkFIFO;
+  FIFO#(Bit#(4))             char_y_pos <- mkFIFO;
+  Reg#(Bit#(32))            char_fg_col <- mkReg(32'hffffffff); // forground colour (white solid)
+  Reg#(Bit#(32))            char_bg_col <- mkReg(32'h00000000); // forground colour (black transparent)
+  Reg#(Bit#(19))              char_base <- mkReg(addr_range);
+  Reg#(Bit#(19))               char_end <- mkReg(addr_range+total_chars*2);
+  Reg#(UInt#(3))             char_x_pos <- mkReg(0);
+  Reg#(UInt#(1))               char_ctr <- mkReg(0);
+  Reg#(Bit#(19))                 char_y <- mkReg(0);
+  Reg#(Bit#(6))         char_x_two_char <- mkReg(0);
+  FIFO#(Bit#(1))             char_pixel <- mkFIFO;
+  
+  // request characters from memory - priority over pixels
+  // N.B. limited storage in chars_read guarantees that ssram_resp won't ever block
+  (* preempts = "request_char_values,request_pixel_values" *)
+  rule request_char_values;
+    ssram_req.enq(
+       SRAMAccess32bT{
+          writeenable: False,
+          byteenable: 4'b1111,
+          addr: char_addr,
+          data: 0});
+    char_y_pos.enq(truncate(char_y));
+    chars_read.enq(True);
+    
+    // compute next address
+    let next_x_two_char_addr = char_x_two_char+1;
+    let next_y_addr = char_y;
+    if(next_x_two_char_addr==50) // 50 words x 2 characters x 8-pixels/char = 800 pixels
+      begin
+        next_x_two_char_addr = 0;
+        next_y_addr = char_y+1;
+        if(next_y_addr==yres)
+          next_y_addr = 0;
+      end
+    char_x_two_char <= next_x_two_char_addr;
+    char_y <= next_y_addr;
+    char_addr <= char_base + extend(next_x_two_char_addr) + ((next_y_addr>>4)*50);
+  endrule
+  // request pixel values from memory
+  // N.B. limited storage in chars_read guarantees that ssram_resp won't ever block
+  rule request_pixel_values;
+    let next_addr = addr+1;
+    let last_addr = next_addr==addr_range;
+    ssram_req.enq(
+       SRAMAccess32bT{
+          writeenable: False,
+          byteenable: 4'b1111,
+          addr: addr,
+          data: 0});
+    pixpos.enq(PixPosT{first: addr==0, last: last_addr});
+    chars_read.enq(False);
+    addr <= last_addr ? 0 : next_addr;
+  endrule
+  
+  rule forward_pixel_values(!chars_read.first);
+    Vector#(4,Bit#(8)) bitmap_col_chan = unpack(ssram_resp.first);
+    Vector#(4,Bit#(8)) char_col_chan = unpack(char_pixel.first==1 ? char_fg_col : char_bg_col);
+    Bit#(8) alpha = char_col_chan[3];
+    for(Integer j=0; j<3; j=j+1)
+      bitmap_col_chan[j] = satPlus(char_col_chan[j], satMinus(bitmap_col_chan[j], alpha));
+//      bitmap_col_chan[j] = char_col_chan[j] | satMinus(bitmap_col_chan[j], alpha);
+    lcd_stream.tx.put(
+       PacketDataT{
+          d: {pack(bitmap_col_chan[2]),pack(bitmap_col_chan[1]),pack(bitmap_col_chan[0])},
+        sop: pixpos.first.first,
+        eop: pixpos.first.last});
+    ssram_resp.deq;
+    pixpos.deq;
+    chars_read.deq;
+    char_pixel.deq;
+  endrule
+  
+  rule buffer_characters_read(chars_read.first);
+    two_chars.enq(unpack(ssram_resp.first));
+    ssram_resp.deq;
+    chars_read.deq;
+  endrule
+  
+  rule demux_two_chars;
+    Bit#(7) char = truncate(two_chars.first[char_ctr].char);
+    Bit#(4) y = char_y_pos.first;
+    UInt#(11) romaddr = unpack({char,y});
+    fontrom.request.put(romaddr);
+    if(char_ctr==1)
+      begin
+        two_chars.deq;
+        char_y_pos.deq;
+      end
+    char_ctr <= char_ctr+1;
+  endrule
+
+  mkConnection(fontrom.response, toPut(fontbits)); // TODO: do peekGet on fromrom.response?
+  
+  rule char_pixels;
+    char_pixel.enq(pack(fontbits.first)[7-char_x_pos]);
+    if(char_x_pos == ~0) fontbits.deq;
+    char_x_pos <= char_x_pos+1;
+  endrule
+  
+  interface Client ssram_access;
+    interface Get request; // TODO: make the following code shorter
+      method ActionValue#(SRAMAccess32bT) get; //  = toGet(ssram_req);
+        ssram_req.deq;
+        return ssram_req.first;
+      endmethod
+    endinterface
+    interface Put response;
+      // method put = toPut(ssram_resp);
+      method Action put(d);
+        ssram_resp.enq(d);
+      endmethod
+    endinterface
+  endinterface
+  interface aso = lcd_stream.physical;  
+
+  method Action writeCharFgColour(Bit#(32) col);  char_fg_col <= col; endmethod
+  method Action writeCharBgColour(Bit#(32) col);  char_bg_col <= col; endmethod
+  method Action writeCharBaseAddr(Bit#(19) a);
+    char_base <= a;
+    char_end  <= a + (total_chars*2);
+  endmethod
+  method ActionValue#(Bit#(32)) readCharFgColour; return char_fg_col; endmethod
+  method ActionValue#(Bit#(32)) readCharBgColour; return char_bg_col; endmethod
+  method ActionValue#(Bit#(19)) readCharBaseAddr; return char_base;   endmethod
+endmodule
+
+
+
+/*****************************************************************************
+ * MTL Framebuffer
+ * ---------------
+ * 
+ * This arbitrates the requests from the AvalonMM slave, Pixel Engine
+ * and SSRAM controller.
+ * 
+ * Forwards the pixel stream from the Pixel Engine
+ *****************************************************************************/
+
+interface MTL_Framebuffer;
+  interface AvalonSlaveBEIfc#(WordAddrWidth) avs;
+  interface AvalonPacketStreamSourcePhysicalIfc#(24) aso;
+  interface SSRAMPhy coe;
+  (* always_ready, always_enabled *)
+  method Action coe_touch(
+     UInt#(10) x1,
+     UInt#(9)  y1,
+     UInt#(10) x2,
+     UInt#(9)  y2,
+     UInt#(10) count_gesture,
+     Bool      touch_valid);
+   method Bool coe_touch_irq();
+endinterface
+
+
+typedef struct {
+   UInt#(10) x1;
+   UInt#(9)  y1;
+   UInt#(10) x2;
+   UInt#(9)  y2;
+   UInt#(10) count_gesture;
+} TouchT deriving (Bits,Eq);
+
+
+(* synthesize,
+   reset_prefix = "csi_clockreset_reset_n",
+   clock_prefix = "csi_clockreset_clk" *)
+module mkMTL_Framebuffer(MTL_Framebuffer);
+  
+  AvalonSlave2ClientBEIfc#(WordAddrWidth) avalon_slave <- mkAvalonSlave2ClientBE;
+  MTL_PixelEngine                       pixel_engine <- mkMTL_PixelEngine;
+  SSRAMIfc                                     ssram <- mkSSRAMController; // SlowWrite; 
+  FIFOF#(SRAMAccessT)        ssram_upper_16b_request <- mkUGFIFOF;  // TODO: use one place FIFO?
+  FIFOF#(Maybe#(Bit#(16)))        lower_16b_returned <- mkUGFIFOF;  // TODO: use one place FIFO?
+  FIFO#(Bool)                    response_for_avalon <- mkSizedFIFO(8);
+  FIFOF#(SRAMAccess32bT)                  avalon_req <- mkGFIFOF(False,True); // ungarded deq
+  FIFOF#(SRAMAccess32bT)            pixel_engine_req <- mkGFIFOF(False,True); // ungarded deq
+  FIFOF#(ReturnedDataT)      avalon_control_reg_resp <- mkFIFOF1;
+  FIFOF#(ReturnedDataT)            avalon_ssram_resp <- mkFIFOF1;
+  FIFOF#(TouchT)                               touch <- mkUGSizedFIFOF(64); // TODO: resize down but check that events aren't being lost
+  Reg#(Bool)                        prev_touch_valid <- mkReg(False);
+  
+  rule avalon_request_splitter;
+    let req <- avalon_slave.client.request.get();
+    if(msb(req.addr)==1)
+      begin
+        UInt#(3) loweraddr = truncate(req.addr);
+        UInt#(32) minusone = unpack(~0);
+        ReturnedDataT rtn = tagged Invalid;
+        case(tuple2(loweraddr,req.rw))
+          tuple2(0, MemWrite) : pixel_engine.writeCharBgColour(pack(req.data));
+          tuple2(0, MemRead)  : begin
+                                  let c <- pixel_engine.readCharBgColour();
+                                  rtn = tagged Valid unpack(c);
+                                end
+          tuple2(1, MemWrite) : pixel_engine.writeCharFgColour(pack(req.data));
+          tuple2(1, MemRead)  : begin
+                                  let c <- pixel_engine.readCharFgColour();
+                                  rtn = tagged Valid unpack(c);
+                                end
+          tuple2(2, MemWrite) : pixel_engine.writeCharBaseAddr(truncate(pack(req.data)));
+          tuple2(2, MemRead)  : begin
+                                  let a <- pixel_engine.readCharBaseAddr();
+                                  rtn = tagged Valid zeroExtend(unpack(a));
+                                end
+          tuple2(3, MemRead) : rtn = tagged Valid (touch.notEmpty ? zeroExtend(touch.first.x1) : minusone);
+          tuple2(4, MemRead) : rtn = tagged Valid (touch.notEmpty ? zeroExtend(touch.first.y1) : minusone);
+          tuple2(5, MemRead) : rtn = tagged Valid (touch.notEmpty ? zeroExtend(touch.first.x2) : minusone);
+          tuple2(6, MemRead) : rtn = tagged Valid (touch.notEmpty ? zeroExtend(touch.first.y2) : minusone);
+          tuple2(7, MemRead) : begin
+                                 rtn = tagged Valid (touch.notEmpty ? zeroExtend(touch.first.count_gesture) : minusone);
+                                 if (touch.notEmpty) touch.deq;
+                               end
+          default : if(req.rw==MemRead) rtn = tagged Valid minusone;
+        endcase
+        avalon_control_reg_resp.enq(rtn);
+      end
+    else
+      avalon_req.enq(
+         SRAMAccess32bT{
+            writeenable: req.rw==MemWrite,
+            byteenable:  req.byteenable,
+            addr:        truncate(pack(req.addr)),
+            data:        pack(req.data)});
+  endrule
+  
+  mkConnection(pixel_engine.ssram_access.request, toPut(pixel_engine_req));
+  
+  rule arbitrate_requests(!ssram_upper_16b_request.notEmpty && (pixel_engine_req.notEmpty || avalon_req.notEmpty));
+    SRAMAccess32bT req;
+    if(pixel_engine_req.notEmpty)  // pixel engine has priority
+      begin
+        req = pixel_engine_req.first;
+        pixel_engine_req.deq;
+        response_for_avalon.enq(False);
+      end
+    else
+      begin
+        req = avalon_req.first;
+        avalon_req.deq;
+        response_for_avalon.enq(True);
+      end
+    ssram.server.request.put(
+       SRAMAccessT{
+          writeenable: req.writeenable,
+          byteenable:  req.byteenable[1:0],
+          addr:        {req.addr,1'b0},
+          data:        req.data[15:0]});
+    ssram_upper_16b_request.enq(
+       SRAMAccessT{
+          writeenable: req.writeenable,
+          byteenable:  req.byteenable[3:2],
+          addr:        {req.addr,1'b1},
+          data:        req.data[31:16]});
+  endrule
+  rule forward_upper_bytes(ssram_upper_16b_request.notEmpty);
+    ssram.server.request.put(ssram_upper_16b_request.first);
+    ssram_upper_16b_request.deq;
+  endrule
+  
+  // return to avalonMM responses from accessing control registers or ssram
+  rule return_control_register_response(avalon_control_reg_resp.notEmpty && !avalon_ssram_resp.notEmpty);
+    avalon_slave.client.response.put(avalon_control_reg_resp.first);
+    avalon_control_reg_resp.deq;
+  endrule
+  rule return_ssram_response(avalon_ssram_resp.notEmpty);
+    avalon_slave.client.response.put(avalon_ssram_resp.first);
+    avalon_ssram_resp.deq;
+  endrule
+  // pair up the SSRAM responses
+  rule receive_ssram_responses;
+    let response <- ssram.server.response.get();
+    if(lower_16b_returned.notEmpty)
+      begin
+        Bit#(16) lower = fromMaybe(?,lower_16b_returned.first);
+        Bit#(16) upper = fromMaybe(?,response);
+        AvalonWordT word = unpack({upper,lower});
+        let resp = isValid(response) && isValid(lower_16b_returned.first) ? tagged Valid word : tagged Invalid;
+        if(response_for_avalon.first)
+          avalon_ssram_resp.enq(resp);
+        else
+          pixel_engine.ssram_access.response.put(pack(word));
+        response_for_avalon.deq;
+        lower_16b_returned.deq;
+      end
+    else
+      lower_16b_returned.enq(response);
+  endrule
+  
+  interface avs = avalon_slave.avs;
+  interface aso = pixel_engine.aso;
+  interface coe = ssram.phy;
+  method Action coe_touch(x1,y1,x2,y2,count_gesture,touch_valid);
+    if(touch_valid && !prev_touch_valid && touch.notFull)
+      touch.enq(TouchT{x1:x1, y1:y1, x2:x2, y2:y2, count_gesture:count_gesture});
+    prev_touch_valid <= touch_valid;
+  endmethod
+  method Bool coe_touch_irq() = touch.notEmpty;
+endmodule
+
+
+endpackage

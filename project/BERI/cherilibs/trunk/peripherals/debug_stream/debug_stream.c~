@@ -1,0 +1,307 @@
+/*-
+ * Copyright (c) 2011 Wojciech A. Koszek <wkoszek@FreeBSD.org>
+ * Copyright (c) 2011 Robert N. M. Watson
+ * All rights reserved.
+ *
+ * This software was developed by SRI International and the University of
+ * Cambridge Computer Laboratory under DARPA/AFRL contract (FA8750-10-C-0237)
+ * ("CTSRD"), as part of the DARPA CRASH research programme.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+#include <sys/types.h>
+#include <sys/mman.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+
+#include <assert.h>
+#include <err.h>
+#include <poll.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <inttypes.h>
+#include <stdbool.h>
+#include <unistd.h>
+#include <termios.h>
+#include <fcntl.h>
+#include <errno.h>
+
+#include "../../include/cheri_debug.h"	/* XXXRW: better include path to use? */
+
+/*-
+ * This file implements a simple character stream for simulated versions of
+ * the CHERI debug unit.
+ *
+ * TODO:
+ *
+ * 2. As with PISM, multiple bus instances should be supported, so that
+ *    eventually, we can have one per CPU instance.
+ * 3. It should be possible to configure debug busses using a simulator
+ *    configuration file.
+ * 5. Switch to POSIX async I/O to avoid any polling using OS interfaces.
+ */
+
+/*
+ * PISM calls out to this module on every cycle.  However, we want to call out
+ * to the OS's poll(2) routines only every (n) cycles.
+ *
+ * XXXRW: Unfortunately, this is not PISM.  Instead we rely on the input ready
+ * interface being invoked every cycle.  If/when the debug unit is hooked up
+ * to a PISM bus, we can switch to using the PSIM cycle tick event.
+ */
+#define 		MAX_DEBUG_CYCLE_INTERVAL		10000
+static uint64_t		 debug_cycle_interval = 10000;
+static uint64_t		 debug_cycle_counter;
+
+/*
+ * Listen socket and current accepted socket (if any).
+ */
+
+static char debug_listen_socket_path_unique[1024];
+
+static const char	*debug_listen_socket_path;
+static int		 debug_listen_socket = -1;
+
+static int		 debug_session_socket = -1;
+static bool		 debug_session_socket_writable = false;
+
+/*
+ * If source "ready" returns true, then source "get" is not allowed to fail.
+ * as such, if we poll and the session socket is readable, we immediately read
+ * one character into a small buffer so that it is available for retrieval by
+ * the CPU if we return "ready".
+ */
+static uint8_t		 debug_buffer;
+static bool		 debug_buffer_readable = false;
+
+/*
+ * Rudimentary tracing facility for the debug socket.
+ */
+static bool		 debug_func_tracing_enabled = false;
+static bool		 debug_socket_tracing_enabled = false;
+
+#define	DEBUG_TRACE_FUNC()	do {					\
+	if (debug_func_tracing_enabled)					\
+		printf("%s\n", __func__);				\
+} while (0)
+
+#define	DEBUG_TRACE_SEND(c)	do {					\
+	if (debug_socket_tracing_enabled)				\
+		printf("%s: sent 0x%02x\n", __func__, (c));		\
+} while (0)
+
+#define	DEBUG_TRACE_RECV(c)	do {					\
+	if (debug_socket_tracing_enabled)				\
+		printf("%s: received 0x%02x\n", __func__, (c));		\
+} while (0)
+
+static void
+debug_session_socket_close(void)
+{
+
+	DEBUG_TRACE_FUNC();
+
+	assert(debug_session_socket != -1);
+
+	close(debug_session_socket);
+	debug_session_socket = -1;
+	debug_session_socket_writable = 0;
+}
+
+/*
+ * We need to poll both listen and accepted sockets at regular intervals for
+ * I/O (or the possibility of I/O).  However, we don't want to do it every
+ * cycle or the simulator will burn lots of CPU in the kernel.
+ */
+static void
+debug_poll(void)
+{
+	struct pollfd pollfd;
+	ssize_t len;
+	int ret;
+
+	DEBUG_TRACE_FUNC();
+
+	debug_cycle_counter++;
+	if (debug_cycle_counter % debug_cycle_interval != 0)
+		return;
+
+	if (debug_listen_socket == -1)
+		return;
+	memset(&pollfd, 0, sizeof(pollfd));
+	pollfd.fd = debug_listen_socket;
+	pollfd.events = POLLIN;
+	ret = poll(&pollfd, 1, 0);
+	if (ret == -1)
+		err(1, "%s: poll on listen socket", __func__);
+	if (ret == 1) {
+		assert(pollfd.revents == POLLIN);
+		debug_session_socket = accept(debug_listen_socket, NULL,
+		    NULL);
+		assert(debug_session_socket != -1);
+	}
+
+	if (debug_session_socket == -1)
+		return;
+	memset(&pollfd, 0, sizeof(pollfd));
+	pollfd.fd = debug_session_socket;
+	pollfd.events = POLLIN | POLLOUT;
+	ret = poll(&pollfd, 1, 0);
+	if (ret == -1)
+		err(1, "%s: poll on accepted socket", __func__);
+	if (ret == 0)
+		return;
+	assert(ret == 1);
+
+	/* XXXRW: Handle POLLHUP? */
+
+	if (pollfd.revents & POLLOUT)
+		debug_session_socket_writable = true;
+
+	/*
+	 * If the session socket was readable and we haven't already buffered
+	 * an input character, read and buffer one now.
+	 */
+	if ((pollfd.revents & POLLIN) && !debug_buffer_readable) {
+		len = read(debug_session_socket, &debug_buffer, sizeof(debug_buffer));
+		if (len > 0) {
+			assert(len == sizeof(debug_buffer));
+			debug_buffer_readable = true;
+			DEBUG_TRACE_RECV(debug_buffer);
+			debug_cycle_interval = 10;
+		} else if (len == 0) {
+			debug_session_socket_close();
+			if (debug_cycle_interval < MAX_DEBUG_CYCLE_INTERVAL)
+				debug_cycle_interval = debug_cycle_interval*2;
+			else debug_cycle_interval = MAX_DEBUG_CYCLE_INTERVAL;
+		} else {
+			warn("%s: DEBUG POLL ERROR: len: %zd", __func__, len);
+		}
+	}
+}
+
+bool
+debug_stream_init(void)
+{
+	struct sockaddr_un sun;
+
+	DEBUG_TRACE_FUNC();
+
+	debug_socket_tracing_enabled =
+	    (getenv(CHERI_DEBUG_SOCKET_TRACING_ENV) != NULL);
+
+	debug_listen_socket = socket(PF_LOCAL, SOCK_STREAM, 0);
+	if (debug_listen_socket == -1) {
+		warn("%s: socket", __func__);
+		return (false);
+	}
+	debug_listen_socket_path = getenv(CHERI_DEBUG_SOCKET_PATH_ENV);
+	if (debug_listen_socket_path == NULL) {
+		debug_listen_socket_path = "/tmp/cheri_debug_listen_socket";
+		snprintf(debug_listen_socket_path_unique, sizeof(debug_listen_socket_path), 
+			"%s%d", debug_listen_socket_path, getuid());
+		debug_listen_socket_path = debug_listen_socket_path_unique;
+		printf("%s", debug_listen_socket_path);
+	}
+	(void)unlink(debug_listen_socket_path_unique);
+	memset(&sun, 0, sizeof(sun));
+	sun.sun_family = AF_LOCAL;
+	/* BSD only: sun.sun_len = sizeof(sun); */
+	strncpy(sun.sun_path, debug_listen_socket_path_unique, sizeof(sun.sun_path)-1);
+	if (bind(debug_listen_socket, (struct sockaddr *)&sun, sizeof(sun)) < 0) {
+		warn("%s: bind", __func__);
+		goto out;
+	}
+	if (listen(debug_listen_socket, -1) < 0) {
+		warn("%s: listen", __func__);
+		goto out;
+	}
+	return (true);
+
+out:
+	close(debug_listen_socket);
+	debug_listen_socket = -1;
+	return (false);
+}
+
+bool
+debug_stream_sink_ready(void)
+{
+
+	DEBUG_TRACE_FUNC();
+
+	return (debug_session_socket_writable);
+}
+
+void
+debug_stream_sink_put(uint8_t ch)
+{
+	ssize_t len;
+
+	DEBUG_TRACE_FUNC();
+
+	/*
+	 * Note: depending on order of operations, we could get here with the
+	 * socket closed.  There is no way to report an error here, so we eat
+	 * it if one occurs.
+	 */
+	if (debug_session_socket == -1)
+		return;
+	DEBUG_TRACE_SEND(ch);
+	len = send(debug_session_socket, &ch, sizeof(ch), MSG_NOSIGNAL);
+	if (len < 0 || len == 0)
+		debug_session_socket_close();
+	else
+		assert(len == sizeof(ch));
+	debug_session_socket_writable = false;
+}
+
+bool
+debug_stream_source_ready(void)
+{
+
+	DEBUG_TRACE_FUNC();
+
+	debug_poll();			/* Called once per cycle here. */
+
+	/*
+	 * The check here is not whether the socket is present and readable,
+	 * but rather, whether we have already buffered an input character,
+	 * which may be the case even if the socket has been closed or is not
+	 * readable.
+	 */
+	return (debug_buffer_readable);
+}
+
+uint8_t
+debug_stream_source_get(void)
+{
+
+	DEBUG_TRACE_FUNC();
+
+	assert(debug_buffer_readable);	/* XXXRW: Hopefully this is true? */
+
+	debug_buffer_readable = false;
+	return (debug_buffer);
+}

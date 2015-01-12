@@ -1,0 +1,104 @@
+#//include "comlib.c"
+
+/* ====================================================================================
+    Subroutines for Quicksort bounds checking benchmark
+   ==================================================================================== */
+   
+#define SIZE  	  100L
+#define QSRUNS  	  2L
+   
+extern void __writeString(char* s);
+extern void __writeHex(unsigned long long n);
+extern void __writeDigit(unsigned long long n);
+
+/* This is mostly adapted from http://www.zentut.com/c-tutorial/c-quicksort-algorithm/ */
+
+void swap(char *x,char *y)
+{
+   char temp;
+   temp = *x;
+   *x = *y;
+   *y = temp;
+}
+ 
+int choose_pivot(int i,int j )
+{
+   return((i+j) /2);
+}
+ 
+void quicksort(char list[],int m,int n)
+{
+   char key;
+   int i,j,k;
+   if( m < n)
+   {
+      k = choose_pivot(m,n);
+      swap(&list[m],&list[k]);
+      key = list[m];
+      i = m+1;
+      j = n;
+      while(i <= j)
+      {
+         while((i <= n) && (list[i] <= key))                 
+                i++;          
+         while((j >= m) && (list[j] > key))
+                j--;
+         if( i < j)
+                swap(&list[i],&list[j]);
+      }
+      // swap two elements
+      swap(&list[m],&list[j]);
+      // recursively sort the lesser list
+      quicksort(list,m,j-1);
+      quicksort(list,j+1,n);
+   }
+}
+
+int sumArray(char * array, int size) {
+	int i, sum=0;
+	for (i=0; i<size; i++) {
+		sum += array[i];
+	}
+	return sum;  
+}
+ 
+int doQuicksort()
+{
+   char * list;
+   __writeString( "a1");
+   int i, size, sum=0;
+   unsigned long long accum = 0;
+ 
+   //printf("The list before sorting is:\n");
+   //printlist(list,SIZE);
+ 
+   unsigned long long requestStart, requestEnd;
+   
+   for (size=SIZE; size<(SIZE*10000); size=size*2) {
+     for (i=0; i<QSRUNS; i++) {
+       __writeString( "a3");
+       list = randomArray(size);
+       while(getCount()>0x1000);
+       requestStart = getCount();
+       // sort the list using quicksort
+       quicksort(list,0,size-1);
+       sum += sumArray(list, size);
+       requestEnd = getCount();
+       if (requestEnd > requestStart) accum += (requestEnd - requestStart);
+       free(list);
+     }
+     accum = accum/QSRUNS;
+     __writeString(" size: ");
+     __writeDigit(size);
+     __writeString("  sum: ");
+     __writeHex(sum);
+     __writeString( "   time: ");
+     __writeDigit(accum);
+     __writeString( " cycles\n");
+     accum = 0;
+     sum = 0;
+   }
+   // print the result
+   //printf("The list after sorting using quicksort algorithm:\n");
+   return 0;
+}

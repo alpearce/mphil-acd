@@ -1,0 +1,675 @@
+Index: Makefile
+===================================================================
+--- Makefile	(revision 11658)
++++ Makefile	(working copy)
+@@ -33,6 +33,7 @@
+ all: cherictl cherictl_test tests
+ 
+ CFLAGS=	-Wall -g -Werror -I . -I ../../include
++#CFLAGS+=-DBERI_NETFPGA -static
+ CC?=	gcc
+ 
+ PROGS:=	berictl		\
+Index: berictl.c
+===================================================================
+--- berictl.c	(revision 11658)
++++ berictl.c	(working copy)
+@@ -131,7 +131,11 @@ struct subcommand berictl_commands[] = {
+ 	    run_zeroargs),
+ 	/* XXX Altera mode should take an instance */
+ 	SC_DECLARE_ZEROARGS("console",
++#ifdef BERI_NETFPGA
++	    "connect to \"UART\" console (PISM via -s, NetFPGA via -n)",
++#else
+ 	    "connect to BERI PISM UART (via -s) or Altera UART",
++#endif
+ 	    run_console),
+ 	SC_DECLARE_ZEROARGS("drain", "drain the debug socket", run_zeroargs),
+ 	{
+@@ -275,7 +279,7 @@ run_console(struct subcommand *scp, int argc, char
+ 
+ 	assert(strcmp("console", scp->sc_name) == 0);
+ 	
+-	return (berictl_console(socketp, cablep));
++	return (berictl_console(bdp, socketp, cablep));
+ }
+ 
+ static int
+@@ -755,7 +759,9 @@ main(int argc, char *argv[])
+ 
+ 	/* XXX: should be a flag in struct subcommand. */
+ 	if (strcmp("cleanup", scp->sc_name) != 0 &&
+-	    strcmp("console", scp->sc_name) != 0 &&
++	    (strcmp("console", scp->sc_name) != 0 ||
++		((strcmp("console", scp->sc_name) == 0) &&
++		(oflags & BERI_DEBUG_CLIENT_OPEN_FLAGS_NETFPGA) != 0)) &&
+ 	    strcmp("help", scp->sc_name) != 0 &&
+ 	    strcmp("loadsof", scp->sc_name) != 0 &&
+ 	    strcmp("man", scp->sc_name) != 0 &&
+Index: berictl_netfpga.h
+===================================================================
+--- berictl_netfpga.h	(revision 0)
++++ berictl_netfpga.h	(working copy)
+@@ -0,0 +1,83 @@
++/*-
++ * Copyright (c) 2013-2014 Bjoern A. Zeeb
++ * All rights reserved.
++ *
++ * This software was developed by SRI International and the University of
++ * Cambridge Computer Laboratory under DARPA/AFRL contract (FA8750-11-C-0249)
++ * ("MRC2"), as part of the DARPA MRC research programme.
++ *
++ * @BERI_LICENSE_HEADER_START@
++ *
++ * Licensed to BERI Open Systems C.I.C. (BERI) under one or more contributor
++ * license agreements.  See the NOTICE file distributed with this work for
++ * additional information regarding copyright ownership.  BERI licenses this
++ * file to you under the BERI Hardware-Software License, Version 1.0 (the
++ * "License"); you may not use this file except in compliance with the
++ * License.  You may obtain a copy of the License at:
++ *
++ *   http://www.beri-open-systems.org/legal/license-1-0.txt
++ *
++ * Unless required by applicable law or agreed to in writing, Work distributed
++ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
++ * CONDITIONS OF ANY KIND, either express or implied.  See the License for the
++ * specific language governing permissions and limitations under the License.
++ *
++ * @BERI_LICENSE_HEADER_END@
++ */
++
++#ifndef	_BERICTL_NETFPGA_H
++#define	_BERICTL_NETFPGA_H
++
++#ifdef BERI_NETFPGA
++#define	NETFPGA_DEV_PATH			"/dev/nf10"
++#ifdef __linux__
++#ifndef NETFPGA_IOCTL_CMD_WRITE_REG
++#define	NETFPGA_IOCTL_CMD_WRITE_REG		(SIOCDEVPRIVATE+1)
++#endif
++#ifndef NETFPGA_IOCTL_CMD_READ_REG
++#define	NETFPGA_IOCTL_CMD_READ_REG		(SIOCDEVPRIVATE+2)
++#endif
++#elif __FreeBSD__
++/* Make something up for now. */
++#define NETFPGA_IOCTL_CMD_WRITE_REG		_IOW('Y', 241, int)
++#define NETFPGA_IOCTL_CMD_READ_REG		_IOW('Y', 242, int)
++#else
++#error NetFPGA ioctls unsupported
++#endif
++#define	NETFPGA_IOCTL_PAYLOAD_MAX		1024
++#define	NETFPGA_AXI_DEBUG_BRIDGE_BASE_ADDR	0x80004000
++#define	NETFPGA_AXI_DEBUG_BRIDGE_WR_GO				\
++	(NETFPGA_AXI_DEBUG_BRIDGE_BASE_ADDR + 0x08)
++#define	NETFPGA_AXI_DEBUG_BRIDGE_WR				\
++	(NETFPGA_AXI_DEBUG_BRIDGE_BASE_ADDR + 0x20)
++#define	NETFPGA_AXI_DEBUG_BRIDGE_RD				\
++	(NETFPGA_AXI_DEBUG_BRIDGE_BASE_ADDR + 0x24)
++#define	NETFPGA_AXI_JTAG_UART_BASE_ADDR		0x7f000100
++#define	NETFPGA_AXI_FIFO_RD_BYTE_VALID		0x01000000
++#define	NETFPGA_AXI_FIFO_RD_BYTE_VALID_CONS	0x80000000
++#define	NETFPGA_IOCTL_WR(r, v)					\
++	do {							\
++		uint64_t rv;					\
++		int ret;					\
++								\
++		assert(((v) & 0xffffff00) == 0);		\
++		rv = ((uint64_t)(r) << 32) | ((v) & 0xff);	\
++		ret = ioctl(bdp->bd_fd, NETFPGA_IOCTL_CMD_WRITE_REG, rv); \
++		if (ret == -1)					\
++			return (BERI_DEBUG_ERROR_SEND);	\
++	} while (0)
++#define	NETFPGA_IOCTL_RD(rv, r)					\
++	do {							\
++		int ret;					\
++								\
++		/* GRR asymmetric ioctls; rv = ((uint64_t)(r) << 32); */ \
++		rv = (uint64_t)(r);				\
++		ret = ioctl(bdp->bd_fd, NETFPGA_IOCTL_CMD_READ_REG, &rv); \
++		if (ret == -1)					\
++			return (BERI_DEBUG_ERROR_READ);	\
++		rv &= 0xffffffff;				\
++	} while ((rv & NETFPGA_AXI_FIFO_RD_BYTE_VALID) !=	\
++	    NETFPGA_AXI_FIFO_RD_BYTE_VALID)
++#endif /* BERI_NETFPGA */
++
++#endif /* _BERICTL_NETFPGA_H */
+Index: cheri_debug.c
+===================================================================
+--- cheri_debug.c	(revision 11658)
++++ cheri_debug.c	(working copy)
+@@ -90,57 +90,8 @@
+ #include "../../include/cheri_debug.h"
+ #include "altera_systemconsole.h"
+ #include "cherictl.h"
++#include "berictl_netfpga.h"
+ 
+-#ifdef BERI_NETFPGA
+-#define	NETFPGA_DEV_PATH			"/dev/nf10"
+-#ifdef __linux__
+-#ifndef NETFPGA_IOCTL_CMD_WRITE_REG
+-#define	NETFPGA_IOCTL_CMD_WRITE_REG		(SIOCDEVPRIVATE+1)
+-#endif
+-#ifndef NETFPGA_IOCTL_CMD_READ_REG
+-#define	NETFPGA_IOCTL_CMD_READ_REG		(SIOCDEVPRIVATE+2)
+-#endif
+-#elif __FreeBSD__
+-/* Make something up for now. */
+-#define NETFPGA_IOCTL_CMD_WRITE_REG		_IOW('Y', 241, int)
+-#define NETFPGA_IOCTL_CMD_READ_REG		_IOW('Y', 242, int)
+-#else
+-#error NetFPGA ioctls unsupported
+-#endif
+-#define	NETFPGA_IOCTL_PAYLOAD_MAX		1024
+-#define	NETFPGA_AXI_DEBUG_BRIDGE_BASE_ADDR	0x80004000
+-#define	NETFPGA_AXI_DEBUG_BRIDGE_WR_GO				\
+-	(NETFPGA_AXI_DEBUG_BRIDGE_BASE_ADDR + 0x08)
+-#define	NETFPGA_AXI_DEBUG_BRIDGE_WR				\
+-	(NETFPGA_AXI_DEBUG_BRIDGE_BASE_ADDR + 0x20)
+-#define	NETFPGA_AXI_DEBUG_BRIDGE_RD				\
+-	(NETFPGA_AXI_DEBUG_BRIDGE_BASE_ADDR + 0x24)
+-#define	NETFPGA_AXI_DEBUG_BRIDGE_RD_VALID	0x01000000
+-#define	NETFPGA_IOCTL_WR(r, v)					\
+-	do {							\
+-		uint64_t rv;					\
+-		int ret;					\
+-								\
+-		assert(((v) & 0xffffff00) == 0);		\
+-		rv = ((uint64_t)(r) << 32) | ((v) & 0xff);	\
+-		ret = ioctl(bdp->bd_fd, NETFPGA_IOCTL_CMD_WRITE_REG, rv); \
+-		if (ret == -1)					\
+-			return (BERI_DEBUG_ERROR_SEND);	\
+-	} while (0)
+-#define	NETFPGA_IOCTL_RD(rv, r)					\
+-	do {							\
+-		int ret;					\
+-								\
+-		/* GRR asymmetric ioctls; rv = ((uint64_t)(r) << 32); */ \
+-		rv = (uint64_t)(r);				\
+-		ret = ioctl(bdp->bd_fd, NETFPGA_IOCTL_CMD_READ_REG, &rv); \
+-		if (ret == -1)					\
+-			return (BERI_DEBUG_ERROR_READ);	\
+-		rv &= 0xffffffff;				\
+-	} while ((rv & NETFPGA_AXI_DEBUG_BRIDGE_RD_VALID) !=	\
+-	    NETFPGA_AXI_DEBUG_BRIDGE_RD_VALID)
+-#endif /* BERI_NETFPGA */
+-
+ #define	BREAKRING_SIZE	4
+ struct beri_debug {
+ 	/*
+@@ -251,6 +202,14 @@ beri_debug_getfd(struct beri_debug *bdp)
+ }
+ 
+ int
++beri_debug_is_netfpga(struct beri_debug *bdp)
++{
++
++	assert(bdp != NULL);
++	return ((bdp->bd_flags & BERI_NETFPGA_IOCTL) == BERI_NETFPGA_IOCTL);
++}
++
++int
+ beri_debug_client_open_path(struct beri_debug **bdpp, const char *pathp,
+     uint32_t oflags)
+ {
+@@ -554,7 +513,7 @@ beri_debug_client_packet_write(struct beri_debug *
+ 	if (bufferlen > BERI_DEBUG_PAYLOAD_MAX)
+ 		return (BERI_DEBUG_ERROR_DATA_TOOBIG);
+ #ifdef BERI_NETFPGA
+-	if ((bdp->bd_flags & BERI_NETFPGA_IOCTL) == BERI_NETFPGA_IOCTL)
++	if (beri_debug_is_netfpga(bdp))
+ 		return (beri_debug_client_write_netfpga_ioctl(bdp,
+ 		    command, bufferp, bufferlen));
+ #endif
+@@ -602,8 +561,8 @@ beri_debug_client_netfpga_drain(struct beri_debug
+ 		ret = ioctl(bdp->bd_fd, NETFPGA_IOCTL_CMD_READ_REG, &rv);
+ 		if (ret == -1)
+ 			return (BERI_DEBUG_ERROR_READ);
+-	} while ((rv & NETFPGA_AXI_DEBUG_BRIDGE_RD_VALID) ==
+-	    NETFPGA_AXI_DEBUG_BRIDGE_RD_VALID);
++	} while ((rv & NETFPGA_AXI_FIFO_RD_BYTE_VALID) ==
++	    NETFPGA_AXI_FIFO_RD_BYTE_VALID);
+ 
+ 	return (BERI_DEBUG_SUCCESS);
+ }
+Index: cherictl.c
+===================================================================
+--- cherictl.c	(revision 11658)
++++ cherictl.c	(working copy)
+@@ -233,7 +233,7 @@ main(int argc, char *argv[])
+ 	if (strcmp(argv[0], "cleanup") == 0)
+ 		ret = beri_debug_cleanup();
+ 	else if (strcmp(argv[0], "console") == 0)
+-		ret = berictl_console(filep, cablep);
++		ret = berictl_console(NULL, filep, cablep);
+ 	else if (strcmp(argv[0], "loadsof") == 0)
+ 		ret = berictl_loadsof(filep, cablep);
+ 	else {
+Index: cherictl.h
+===================================================================
+--- cherictl.h	(revision 11658)
++++ cherictl.h	(working copy)
+@@ -52,7 +52,9 @@ int	str2regnum(const char *string, u_int *regnump)
+ int	berictl_breakpoint(struct beri_debug *bdp, const char *addrp,
+ 	    int waitflag);
+ int	beri_debug_getfd(struct beri_debug *);
+-int	berictl_console(const char *filenamep, const char *cablep);
++int	beri_debug_is_netfpga(struct beri_debug *);
++int	berictl_console(struct beri_debug *, const char *filenamep,
++	    const char *cablep);
+ int	berictl_c0regs(struct beri_debug *bdp);
+ int	berictl_c2regs(struct beri_debug *bdp);
+ int	berictl_drain(struct beri_debug *bdp);
+Index: cherictl_base.c
+===================================================================
+--- cherictl_base.c	(revision 11658)
++++ cherictl_base.c	(working copy)
+@@ -3,7 +3,7 @@
+  * Copyright (c) 2012-2013 Jonathan Woodruff
+  * Copyright (c) 2012-2013 SRI International
+  * Copyright (c) 2012 Robert Norton
+- * Copyright (c) 2012 Bjoern A. Zeeb
++ * Copyright (c) 2012,2014 Bjoern A. Zeeb
+  * Copyright (c) 2013 David T. Chisnall
+  * Copyright (c) 2013 Colin Rothwell
+  * All rights reserved.
+@@ -49,6 +49,9 @@
+ #include <sys/socket.h>
+ #include <sys/stat.h>
+ #include <sys/un.h>
++#ifdef BERI_NETFPGA
++#include <sys/ioctl.h>
++#endif
+ 
+ #ifdef __linux__
+ #include <endian.h>
+@@ -72,6 +75,9 @@
+ 
+ #include "../../include/cheri_debug.h"
+ #include "cherictl.h"
++#ifdef BERI_NETFPGA
++#include "berictl_netfpga.h"
++#endif
+ #include "mips_decode.h"
+ #include "status_bar.h"
+ 
+@@ -180,6 +186,47 @@ berictl_breakpoint(struct beri_debug *bdp, const c
+ 	return (beri_debug_client_breakpoint_clear(bdp, 0));
+ }
+ 
++#ifdef BERI_NETFPGA
++static int
++_netfpga_write(struct beri_debug *bdp, const char v)
++{
++	uint64_t rv;
++	int bd_fd, ret;
++
++	bd_fd = beri_debug_getfd(bdp);
++
++	rv = ((uint64_t)(NETFPGA_AXI_JTAG_UART_BASE_ADDR) << 32) | ((v) & 0xff);
++	ret = ioctl(bd_fd, NETFPGA_IOCTL_CMD_WRITE_REG, rv);
++	if (ret < 0)
++		return (ret);
++	else
++		return (1);
++}
++
++static int
++_netfpga_read(struct beri_debug *bdp)
++{
++	uint64_t rv;
++	int bd_fd, ret;
++	char ch;
++
++	bd_fd = beri_debug_getfd(bdp);
++	do {
++		rv = (uint64_t)(NETFPGA_AXI_JTAG_UART_BASE_ADDR);
++		ret = ioctl(bd_fd, NETFPGA_IOCTL_CMD_READ_REG, &rv);
++		if (ret == -1)
++			return (ret);
++		rv &= 0xffffffff;
++		if (rv & NETFPGA_AXI_FIFO_RD_BYTE_VALID_CONS) {
++			ch = rv & 0xff;
++			(void)write(STDOUT_FILENO, &ch, sizeof(ch));
++		}
++	} while (rv & NETFPGA_AXI_FIFO_RD_BYTE_VALID_CONS);
++
++	return (ret);
++}
++#endif
++
+ #ifndef __DECONST
+ #define	__DECONST(type, var)	((type)(uintptr_t)(const void *)(var))
+ #endif
+@@ -188,122 +235,36 @@ berictl_breakpoint(struct beri_debug *bdp, const c
+ #define	CONSOLE_STATE_TILDE	3
+ #define	CONSOLE_STATE_QUESTION	4
+ int
+-berictl_console(const char *filenamep, const char *cablep)
++berictl_console_eventloop(struct beri_debug *bdp, int fd, pid_t pid)
+ {
+-	struct sockaddr_un sun;
+ 	struct pollfd pollfd[2];
+-	struct termios trm_new, trm_save;
+ 	ssize_t len;
+ 	u_int console_state;
+-	pid_t pid;
+-	int send_input, terminate;
+-	int fd, nfds, restarting, all_ones;
+-	int sockets[2];
+-	char ch, *nios_path;
+-	char *argv[] = {
+-	    "nios2-terminal", "-q", "--no-quit-on-ctrl-d", "--instance", "1",
+-	    NULL, NULL, NULL };
++	int all_ones, is_netfpga, nfds, send_input, terminate;
++	char ch;
+ 
+-	if ((nios_path = getenv("BERICTL_NIOS2_TERMINAL")) != NULL)
+-		argv[0] = nios_path;
+-
+-	restarting = 0;
+-restart:
+-	all_ones = 0;
+-
+-	if (filenamep == NULL) {
+-		if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == -1) {
+-			warn("socketpair");
+-			return (BERI_DEBUG_ERROR_SOCKETPAIR);
+-		}
+-		pid = fork();
+-		if (pid < 0) {
+-			warn("fork");
+-			return (BERI_DEBUG_ERROR_FORK);
+-		} else if (pid != 0) {
+-			close(sockets[1]);
+-			fd = sockets[0];
+-		} else {
+-			close(sockets[0]);
+-			if (dup2(sockets[1], STDIN_FILENO) == -1 ||
+-			    dup2(sockets[1], STDOUT_FILENO) == -1)
+-				err(1, "dup2");
+-#ifdef __FreeBSD__
+-			closefrom(3);
+-#else
+-			/* XXX: weaker than ideal cleanup. */
+-			close(sockets[1]);
+-#endif
+-			if (cablep != NULL && *cablep != '\0') {
+-				argv[5] = "--cable";
+-				argv[6] = __DECONST(char *, cablep);
+-			}
+-			/*
+-			 * XXX: does not make it to the user, but without
+-			 * some output before exec we seem to get EOF and
+-			 * terminate the session.
+-			 */
+-			printf("starting nios2-terminal\n");
+-			execvp(argv[0], argv);
+-			if (errno == ENOENT)
+-				err(1, "nios2-terminal not found in PATH");
+-			err(1, "execvp");
+-		}
+-	} else {
+-		fd = socket(PF_LOCAL, SOCK_STREAM, 0);
+-		if (fd < 0) {
+-			warn("socket");
+-			return (BERI_DEBUG_ERROR_SOCKET);
+-		}
+-		memset(&sun, 0, sizeof(sun));
+-		sun.sun_family = AF_LOCAL;
+-		/* XXXRW: BSD-only: sun.sun_len = sizeof(sun); */
+-		strncpy(sun.sun_path, filenamep, sizeof(sun.sun_path) - 1);
+-		if (connect(fd, (struct sockaddr *)&sun, sizeof(sun)) < 0) {
+-			warn("connect: %s", filenamep);
+-			close(fd);
+-			return (BERI_DEBUG_ERROR_CONNECT);
+-		}
+-		pid = 0;
+-	}
+-
+-	if (restarting)
+-		fprintf(stderr, "Board reset detected, reconnecting.\n");
+-	else
+-		fprintf(stderr,
+-		    "Connecting to BERI UART; ~. to close console.\n");
+-
+ 	/*
+-	 * Put TTY into raw mode so that we can forward character-at-a-time
+-	 * and let the console code running on top of BERI do its thing.
+-	 *
+-	 * XXX: should catch signals and restore tty
+-	 */
+-	if (!restarting) {
+-		tcgetattr(STDIN_FILENO, &trm_save);
+-		trm_new = trm_save;
+-		cfmakeraw(&trm_new);
+-		tcsetattr(STDIN_FILENO, TCSANOW, &trm_new);
+-	}
+-
+-	/*
+ 	 * This event loop has a historically deadlock-prone structure.
+ 	 */
++	all_ones = 0;
++	is_netfpga = beri_debug_is_netfpga(bdp);
+ 	terminate = 0;
+ 	console_state = CONSOLE_STATE_PLAIN;
+ 	do {
+-		pollfd[0].events = POLLIN;
+-		pollfd[0].revents = 0;
+-		pollfd[0].fd = fd;
+-		pollfd[1].events = POLLIN;
+-		pollfd[1].revents = 0;
+-		pollfd[1].fd = STDIN_FILENO;
+-		nfds = poll(pollfd, 2, -1);
++		pollfd[0].fd = STDIN_FILENO;
++		if (!is_netfpga) {
++			pollfd[1].events = POLLIN;
++			pollfd[1].revents = 0;
++			pollfd[1].fd = fd;
++			nfds = poll(pollfd, 2, -1);
++		} else {
++			nfds = poll(pollfd, 1, 10);
++		}
+ 		if (nfds < 0) {
+ 			warn("poll");
+ 			continue;
+ 		}
+-		if (pollfd[0].revents & POLLIN) {
++		if (!is_netfpga && (pollfd[1].revents & POLLIN)) {
+ 			len = read(fd, &ch, sizeof(ch));
+ 			if (len < 0) {
+ 				warn("read console");
+@@ -324,17 +285,27 @@ int
+ 			if (pid > 0 && ch == -1) {
+ 				all_ones++;
+ 				if (all_ones > 1000) {
+-					restarting = 1;
+ 					close(fd);
+ 					kill(pid, SIGKILL);
+ 					printf("\n");
+-					goto restart;
++					return (1);
+ 				}
+ 			} else
+ 				all_ones = 0;
+ 			(void)write(STDOUT_FILENO, &ch, sizeof(ch));
++#ifdef BERI_NETFPGA
++		} else if (is_netfpga) {
++			/* Always poll the ``jtag-uart''. */
++			int ret;
++
++			ret = _netfpga_read(bdp);
++			if (ret == -1) {
++				warn("read console");
++				break;
++			}
++#endif
+ 		}
+-		if (pollfd[1].revents & POLLIN) {
++		if (pollfd[0].revents & POLLIN) {
+ 			len = read(STDIN_FILENO, &ch, sizeof(ch));
+ 			if (len < 0) {
+ 				warn("read stdin");
+@@ -367,13 +338,31 @@ int
+ 					break;
+ 
+ 				default:
+-					send(fd, "~", sizeof('~'),
+-					    MSG_NOSIGNAL);
++					if (!is_netfpga)
++						send(fd, "~", sizeof('~'),
++						    MSG_NOSIGNAL);
++#ifdef BERI_NETFPGA
++					else {
++						int ret;
++
++						ret = _netfpga_write(bdp, '~');
++						if (ret == -1) {
++							warn("send console");
++							break;
++						}
++					}
++#endif
+ 					console_state = CONSOLE_STATE_PLAIN;
+ 				}
+ 			}
+ 			if (send_input) {
+-				len = send(fd, &ch, sizeof(ch), MSG_NOSIGNAL);
++				if (!is_netfpga)
++					len = send(fd, &ch, sizeof(ch),
++					    MSG_NOSIGNAL);
++#ifdef BERI_NETFPGA
++				else
++					len = _netfpga_write(bdp, ch);
++#endif
+ 				if (len < 0) {
+ 					warn("send console");
+ 					break;
+@@ -386,7 +375,113 @@ int
+ 			}
+ 		}
+ 	} while ((pollfd[0].revents & POLLHUP) == 0 &&
+-	    (pollfd[1].revents & POLLHUP) == 0 && !terminate);
++	    (is_netfpga || ((pollfd[1].revents & POLLHUP) == 0)) &&
++	    !terminate);
++
++	return (0);
++}
++
++int
++berictl_console(struct beri_debug *bdp, const char *filenamep,
++    const char *cablep)
++{
++	struct sockaddr_un sun;
++	struct termios trm_new, trm_save;
++	pid_t pid;
++	int fd, restarting;
++	int is_netfpga;
++	int sockets[2];
++	char *nios_path;
++	char *argv[] = {
++	    "nios2-terminal", "-q", "--no-quit-on-ctrl-d", "--instance", "1",
++	    NULL, NULL, NULL };
++
++	if ((nios_path = getenv("BERICTL_NIOS2_TERMINAL")) != NULL)
++		argv[0] = nios_path;
++
++	is_netfpga = (bdp != NULL && beri_debug_is_netfpga(bdp));
++	restarting = 0;
++restart:
++	if (!is_netfpga && filenamep == NULL) {
++		if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == -1) {
++			warn("socketpair");
++			return (BERI_DEBUG_ERROR_SOCKETPAIR);
++		}
++		pid = fork();
++		if (pid < 0) {
++			warn("fork");
++			return (BERI_DEBUG_ERROR_FORK);
++		} else if (pid != 0) {
++			close(sockets[1]);
++			fd = sockets[0];
++		} else {
++			close(sockets[0]);
++			if (dup2(sockets[1], STDIN_FILENO) == -1 ||
++			    dup2(sockets[1], STDOUT_FILENO) == -1)
++				err(1, "dup2");
++#ifdef __FreeBSD__
++			closefrom(3);
++#else
++			/* XXX: weaker than ideal cleanup. */
++			close(sockets[1]);
++#endif
++			if (cablep != NULL && *cablep != '\0') {
++				argv[5] = "--cable";
++				argv[6] = __DECONST(char *, cablep);
++			}
++			/*
++			 * XXX: does not make it to the user, but without
++			 * some output before exec we seem to get EOF and
++			 * terminate the session.
++			 */
++			printf("starting nios2-terminal\n");
++			execvp(argv[0], argv);
++			if (errno == ENOENT)
++				err(1, "nios2-terminal not found in PATH");
++			err(1, "execvp");
++		}
++	} else if (!is_netfpga) {
++		fd = socket(PF_LOCAL, SOCK_STREAM, 0);
++		if (fd < 0) {
++			warn("socket");
++			return (BERI_DEBUG_ERROR_SOCKET);
++		}
++		memset(&sun, 0, sizeof(sun));
++		sun.sun_family = AF_LOCAL;
++		/* XXXRW: BSD-only: sun.sun_len = sizeof(sun); */
++		strncpy(sun.sun_path, filenamep, sizeof(sun.sun_path) - 1);
++		if (connect(fd, (struct sockaddr *)&sun, sizeof(sun)) < 0) {
++			warn("connect: %s", filenamep);
++			close(fd);
++			return (BERI_DEBUG_ERROR_CONNECT);
++		}
++		pid = 0;
++	} else if (is_netfpga)
++		pid = 0;
++
++	if (restarting)
++		fprintf(stderr, "Board reset detected, reconnecting.\n");
++	else
++		fprintf(stderr,
++		    "Connecting to BERI UART; ~. to close console.\n");
++
++	/*
++	 * Put TTY into raw mode so that we can forward character-at-a-time
++	 * and let the console code running on top of BERI do its thing.
++	 *
++	 * XXX: should catch signals and restore tty
++	 */
++	if (!restarting) {
++		tcgetattr(STDIN_FILENO, &trm_save);
++		trm_new = trm_save;
++		cfmakeraw(&trm_new);
++		tcsetattr(STDIN_FILENO, TCSANOW, &trm_new);
++	}
++
++	restarting = berictl_console_eventloop(bdp, fd, pid);
++	if (restarting != 0)
++		goto restart;
++
+ 	if (pid > 0)
+ 		kill(pid, SIGKILL);
+ 	close(fd);
+Index: cherictl_test.c
+===================================================================
+--- cherictl_test.c	(revision 11658)
++++ cherictl_test.c	(working copy)
+@@ -89,7 +89,7 @@ int berictl_docontrol(struct beri_debug *bdp, cons
+ 			ret = berictl_breakpoint(bdp, op1, 0);
+     } else if((len == 2) && strcmp(cmd, "console") == 0){
+       printf("console!");
+-			ret = berictl_console(op1, NULL);
++			ret = berictl_console(NULL, op1, NULL);
+     } else if ((len == 1) && strcmp(cmd, "c0regs") == 0){
+       printf("c0regs!");
+ 			ret = berictl_c0regs(bdp);

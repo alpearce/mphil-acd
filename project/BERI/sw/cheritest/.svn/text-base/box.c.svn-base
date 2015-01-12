@@ -1,0 +1,33 @@
+#include "armArray.h"
+
+int box_get_jal(int i) {
+  return ((i^0xF00B) + 100);
+}
+
+int box_get_cjalr(int i) {
+  //
+  //asm volatile("jalr %0": : "g" (box_get_offset));
+  
+  int retVal = ((i^0xF00B) + 100);
+  asm volatile("CMOVE $c0, $c24");
+  asm volatile("CJR $31($c24)");
+  asm volatile("move $v0, %0": : "r" (retVal) : "v0");
+  return 0;
+}
+
+int box_get_ccall(int i) {
+  //
+  //asm volatile("jalr %0": : "g" (box_get_offset));
+  
+  int retVal = ((i^0xF00B) + 100);
+  asm volatile("CCALL $c1, $c2");
+  asm volatile("move $v0, %0": : "r" (retVal) : "v0");
+  return 0;
+}
+
+int box_get_user(int i) {
+  int retVal = ((i^0xF00B) + 100);
+  asm volatile("move $v0, %0": : "r" (retVal) : "v0");
+  asm volatile("syscall 0; nop; nop; nop; nop; nop; nop; nop; nop;");
+  return 0;
+}

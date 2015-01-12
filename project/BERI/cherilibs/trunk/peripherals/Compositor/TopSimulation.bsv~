@@ -1,0 +1,15 @@
+/*-
+ * Copyright (c) 2013 Philip Withnall
+ * All rights reserved.
+*/
+
+package TopSimulation;
+
+import CompositorPhy::*;
+
+(* synthesize *)
+module mkTopSimulation ();
+	CompositorPhyIfc compositor <- mkCompositorPhy ();
+endmodule: mkTopSimulation
+
+endpackage: TopSimulation

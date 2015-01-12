@@ -1,0 +1,4 @@
+Reduce the cycle count between checking for debug commands to 100 cycles from 1000.
+--This line, and those below, will be ignored--
+
+M    debug_stream/debug_stream.c
