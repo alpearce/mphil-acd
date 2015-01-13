@@ -42,422 +42,221 @@
 %% File list of work: IEEEtran.cls, IEEEtran_HOWTO.pdf, bare_adv.tex,
 %%                    bare_conf.tex, bare_jrnl.tex, bare_jrnl_compsoc.tex
 %%*************************************************************************
-
-% *** Authors should verify (and, if needed, correct) their LaTeX system  ***
-% *** with the testflow diagnostic prior to trusting their LaTeX platform ***
-% *** with production work. IEEE's font choices can trigger bugs that do  ***
-% *** not appear when using other class files.                            ***
-% The testflow support page is at:
-% http://www.michaelshell.org/tex/testflow/
-
-
-
-% Note that the a4paper option is mainly intended so that authors in
-% countries using A4 can easily print to A4 and see how their papers will
-% look in print - the typesetting of the document will not typically be
-% affected with changes in paper size (but the bottom and side margins will).
-% Use the testflow package mentioned above to verify correct handling of
-% both paper sizes by the user's LaTeX system.
-%
-% Also note that the "draftcls" or "draftclsnofoot", not "draft", option
-% should be used if it is desired that the figures are to be displayed in
-% draft mode.
-%
 \documentclass[conference]{IEEEtran}
-% Add the compsoc option for Computer Society conferences.
-%
-% If IEEEtran.cls has not been installed into the LaTeX system files,
-% manually specify the path to it like:
-% \documentclass[conference]{../sty/IEEEtran}
-
-
-
-
-
-% Some very useful LaTeX packages include:
-% (uncomment the ones you want to load)
-
-
-% *** MISC UTILITY PACKAGES ***
-%
-%\usepackage{ifpdf}
-% Heiko Oberdiek's ifpdf.sty is very useful if you need conditional
-% compilation based on whether the output is pdf or dvi.
-% usage:
-% \ifpdf
-%   % pdf code
-% \else
-%   % dvi code
-% \fi
-% The latest version of ifpdf.sty can be obtained from:
-% http://www.ctan.org/tex-archive/macros/latex/contrib/oberdiek/
-% Also, note that IEEEtran.cls V1.7 and later provides a builtin
-% \ifCLASSINFOpdf conditional that works the same way.
-% When switching from latex to pdflatex and vice-versa, the compiler may
-% have to be run twice to clear warning/error messages.
-
-
-
-
-
-
-% *** CITATION PACKAGES ***
-%
-%\usepackage{cite}
-% cite.sty was written by Donald Arseneau
-% V1.6 and later of IEEEtran pre-defines the format of the cite.sty package
-% \cite{} output to follow that of IEEE. Loading the cite package will
-% result in citation numbers being automatically sorted and properly
-% "compressed/ranged". e.g., [1], [9], [2], [7], [5], [6] without using
-% cite.sty will become [1], [2], [5]--[7], [9] using cite.sty. cite.sty's
-% \cite will automatically add leading space, if needed. Use cite.sty's
-% noadjust option (cite.sty V3.8 and later) if you want to turn this off.
-% cite.sty is already installed on most LaTeX systems. Be sure and use
-% version 4.0 (2003-05-27) and later if using hyperref.sty. cite.sty does
-% not currently provide for hyperlinked citations.
-% The latest version can be obtained at:
-% http://www.ctan.org/tex-archive/macros/latex/contrib/cite/
-% The documentation is contained in the cite.sty file itself.
-
-
-
-
-
-
-% *** GRAPHICS RELATED PACKAGES ***
-%
-\ifCLASSINFOpdf
-  % \usepackage[pdftex]{graphicx}
-  % declare the path(s) where your graphic files are
-  % \graphicspath{{../pdf/}{../jpeg/}}
-  % and their extensions so you won't have to specify these with
-  % every instance of \includegraphics
-  % \DeclareGraphicsExtensions{.pdf,.jpeg,.png}
-\else
-  % or other class option (dvipsone, dvipdf, if not using dvips). graphicx
-  % will default to the driver specified in the system graphics.cfg if no
-  % driver is specified.
-  % \usepackage[dvips]{graphicx}
-  % declare the path(s) where your graphic files are
-  % \graphicspath{{../eps/}}
-  % and their extensions so you won't have to specify these with
-  % every instance of \includegraphics
-  % \DeclareGraphicsExtensions{.eps}
-\fi
-% graphicx was written by David Carlisle and Sebastian Rahtz. It is
-% required if you want graphics, photos, etc. graphicx.sty is already
-% installed on most LaTeX systems. The latest version and documentation can
-% be obtained at: 
-% http://www.ctan.org/tex-archive/macros/latex/required/graphics/
-% Another good source of documentation is "Using Imported Graphics in
-% LaTeX2e" by Keith Reckdahl which can be found as epslatex.ps or
-% epslatex.pdf at: http://www.ctan.org/tex-archive/info/
-%
-% latex, and pdflatex in dvi mode, support graphics in encapsulated
-% postscript (.eps) format. pdflatex in pdf mode supports graphics
-% in .pdf, .jpeg, .png and .mps (metapost) formats. Users should ensure
-% that all non-photo figures use a vector format (.eps, .pdf, .mps) and
-% not a bitmapped formats (.jpeg, .png). IEEE frowns on bitmapped formats
-% which can result in "jaggedy"/blurry rendering of lines and letters as
-% well as large increases in file sizes.
-%
-% You can find documentation about the pdfTeX application at:
-% http://www.tug.org/applications/pdftex
-
-
-
-
-
-% *** MATH PACKAGES ***
-%
-%\usepackage[cmex10]{amsmath}
-% A popular package from the American Mathematical Society that provides
-% many useful and powerful commands for dealing with mathematics. If using
-% it, be sure to load this package with the cmex10 option to ensure that
-% only type 1 fonts will utilized at all point sizes. Without this option,
-% it is possible that some math symbols, particularly those within
-% footnotes, will be rendered in bitmap form which will result in a
-% document that can not be IEEE Xplore compliant!
-%
-% Also, note that the amsmath package sets \interdisplaylinepenalty to 10000
-% thus preventing page breaks from occurring within multiline equations. Use:
-%\interdisplaylinepenalty=2500
-% after loading amsmath to restore such page breaks as IEEEtran.cls normally
-% does. amsmath.sty is already installed on most LaTeX systems. The latest
-% version and documentation can be obtained at:
-% http://www.ctan.org/tex-archive/macros/latex/required/amslatex/math/
-
-
-
-
-
-% *** SPECIALIZED LIST PACKAGES ***
-%
-%\usepackage{algorithmic}
-% algorithmic.sty was written by Peter Williams and Rogerio Brito.
-% This package provides an algorithmic environment fo describing algorithms.
-% You can use the algorithmic environment in-text or within a figure
-% environment to provide for a floating algorithm. Do NOT use the algorithm
-% floating environment provided by algorithm.sty (by the same authors) or
-% algorithm2e.sty (by Christophe Fiorio) as IEEE does not use dedicated
-% algorithm float types and packages that provide these will not provide
-% correct IEEE style captions. The latest version and documentation of
-% algorithmic.sty can be obtained at:
-% http://www.ctan.org/tex-archive/macros/latex/contrib/algorithms/
-% There is also a support site at:
-% http://algorithms.berlios.de/index.html
-% Also of interest may be the (relatively newer and more customizable)
-% algorithmicx.sty package by Szasz Janos:
-% http://www.ctan.org/tex-archive/macros/latex/contrib/algorithmicx/
-
-
-
-
-% *** ALIGNMENT PACKAGES ***
-%
-%\usepackage{array}
-% Frank Mittelbach's and David Carlisle's array.sty patches and improves
-% the standard LaTeX2e array and tabular environments to provide better
-% appearance and additional user controls. As the default LaTeX2e table
-% generation code is lacking to the point of almost being broken with
-% respect to the quality of the end results, all users are strongly
-% advised to use an enhanced (at the very least that provided by array.sty)
-% set of table tools. array.sty is already installed on most systems. The
-% latest version and documentation can be obtained at:
-% http://www.ctan.org/tex-archive/macros/latex/required/tools/
-
-
-%\usepackage{mdwmath}
-%\usepackage{mdwtab}
-% Also highly recommended is Mark Wooding's extremely powerful MDW tools,
-% especially mdwmath.sty and mdwtab.sty which are used to format equations
-% and tables, respectively. The MDWtools set is already installed on most
-% LaTeX systems. The lastest version and documentation is available at:
-% http://www.ctan.org/tex-archive/macros/latex/contrib/mdwtools/
-
-
-% IEEEtran contains the IEEEeqnarray family of commands that can be used to
-% generate multiline equations as well as matrices, tables, etc., of high
-% quality.
-
-
-%\usepackage{eqparbox}
-% Also of notable interest is Scott Pakin's eqparbox package for creating
-% (automatically sized) equal width boxes - aka "natural width parboxes".
-% Available at:
-% http://www.ctan.org/tex-archive/macros/latex/contrib/eqparbox/
-
-
-
-
-
-% *** SUBFIGURE PACKAGES ***
-%\usepackage[tight,footnotesize]{subfigure}
-% subfigure.sty was written by Steven Douglas Cochran. This package makes it
-% easy to put subfigures in your figures. e.g., "Figure 1a and 1b". For IEEE
-% work, it is a good idea to load it with the tight package option to reduce
-% the amount of white space around the subfigures. subfigure.sty is already
-% installed on most LaTeX systems. The latest version and documentation can
-% be obtained at:
-% http://www.ctan.org/tex-archive/obsolete/macros/latex/contrib/subfigure/
-% subfigure.sty has been superceeded by subfig.sty.
-
-
-
-%\usepackage[caption=false]{caption}
-%\usepackage[font=footnotesize]{subfig}
-% subfig.sty, also written by Steven Douglas Cochran, is the modern
-% replacement for subfigure.sty. However, subfig.sty requires and
-% automatically loads Axel Sommerfeldt's caption.sty which will override
-% IEEEtran.cls handling of captions and this will result in nonIEEE style
-% figure/table captions. To prevent this problem, be sure and preload
-% caption.sty with its "caption=false" package option. This is will preserve
-% IEEEtran.cls handing of captions. Version 1.3 (2005/06/28) and later 
-% (recommended due to many improvements over 1.2) of subfig.sty supports
-% the caption=false option directly:
-%\usepackage[caption=false,font=footnotesize]{subfig}
-%
-% The latest version and documentation can be obtained at:
-% http://www.ctan.org/tex-archive/macros/latex/contrib/subfig/
-% The latest version and documentation of caption.sty can be obtained at:
-% http://www.ctan.org/tex-archive/macros/latex/contrib/caption/
-
-
-
-
-% *** FLOAT PACKAGES ***
-%
-%\usepackage{fixltx2e}
-% fixltx2e, the successor to the earlier fix2col.sty, was written by
-% Frank Mittelbach and David Carlisle. This package corrects a few problems
-% in the LaTeX2e kernel, the most notable of which is that in current
-% LaTeX2e releases, the ordering of single and double column floats is not
-% guaranteed to be preserved. Thus, an unpatched LaTeX2e can allow a
-% single column figure to be placed prior to an earlier double column
-% figure. The latest version and documentation can be found at:
-% http://www.ctan.org/tex-archive/macros/latex/base/
-
-
-
-%\usepackage{stfloats}
-% stfloats.sty was written by Sigitas Tolusis. This package gives LaTeX2e
-% the ability to do double column floats at the bottom of the page as well
-% as the top. (e.g., "\begin{figure*}[!b]" is not normally possible in
-% LaTeX2e). It also provides a command:
-%\fnbelowfloat
-% to enable the placement of footnotes below bottom floats (the standard
-% LaTeX2e kernel puts them above bottom floats). This is an invasive package
-% which rewrites many portions of the LaTeX2e float routines. It may not work
-% with other packages that modify the LaTeX2e float routines. The latest
-% version and documentation can be obtained at:
-% http://www.ctan.org/tex-archive/macros/latex/contrib/sttools/
-% Documentation is contained in the stfloats.sty comments as well as in the
-% presfull.pdf file. Do not use the stfloats baselinefloat ability as IEEE
-% does not allow \baselineskip to stretch. Authors submitting work to the
-% IEEE should note that IEEE rarely uses double column equations and
-% that authors should try to avoid such use. Do not be tempted to use the
-% cuted.sty or midfloat.sty packages (also by Sigitas Tolusis) as IEEE does
-% not format its papers in such ways.
-
-
-
-
-
-% *** PDF, URL AND HYPERLINK PACKAGES ***
-%
-%\usepackage{url}
-% url.sty was written by Donald Arseneau. It provides better support for
-% handling and breaking URLs. url.sty is already installed on most LaTeX
-% systems. The latest version can be obtained at:
-% http://www.ctan.org/tex-archive/macros/latex/contrib/misc/
-% Read the url.sty source comments for usage information. Basically,
-% \url{my_url_here}.
-
-
-
-
-
-% *** Do not adjust lengths that control margins, column widths, etc. ***
-% *** Do not use packages that alter fonts (such as pslatex).         ***
-% There should be no need to do such things with IEEEtran.cls V1.6 and later.
-% (Unless specifically asked to do so by the journal or conference you plan
-% to submit to, of course. )
-
-
-% correct bad hyphenation here
-\hyphenation{op-tical net-works semi-conduc-tor}
-
+\usepackage{graphicx}
+
+\usepackage{filecontents}
+\usepackage{tikz}
+\usepackage{pgfplots,pgfplotstable} 
+
+\pgfplotsset{
+    discard if/.style 2 args={
+        x filter/.code={
+            \ifdim\thisrow{#1} pt=#2pt
+                \def\pgfmathresult{inf}
+            \fi
+        }
+    },
+    discard if not/.style 2 args={
+        x filter/.code={
+            \ifdim\thisrow{#1} pt=#2pt
+            \else
+                \def\pgfmathresult{inf}
+            \fi
+        }
+    }
+}
+
+\begin{filecontents}{comp.dat}
+Coord Title Ratio Idx
+1 {\rotatebox{45}{MPC555[14]}}		    0.7	  1 
+2 {\rotatebox{45}{ARM7 ETM[14]}}		      0.7   1
+3 {\rotatebox{45}{Nexus 5001[8]}}     	  0.12	1 % cite hopkins
+4 {\rotatebox{45}{ }}		          0.66	2
+5 {\rotatebox{45}{RATCHET[18]}}		    1.39	3
+6 {\rotatebox{45}{VPC3[3]}}		      1.9	  3
+7 {\rotatebox{45}{zcompr[12]}}		    2.1 	3
+
+\end{filecontents}
 
 \begin{document}
 %
-% paper title
-% can use linebreaks \\ within to get better formatting as desired
-\title{Value Prediction-Based Trace Compression in BERI} %TODO better title
+\title{Value-Prediction-Based Data Trace \\ Compression in BERI} 
 
 
-% author names and affiliations
-% use a multiple column layout for up to three different
-% affiliations
 \author{\IEEEauthorblockN{Allison Pearce}
 \IEEEauthorblockA{St. Edmund's College\\
 ap819@cam.ac.uk}}
 
-
-% make the title area
 \maketitle
 
 \begin{abstract}
-Execution traces are a vital tool for the development and analysis of research processors, but they are often
-%TODO better word than restrictively
+Extended program traces are a vital tool for the development and analysis of research processors, but they are often
 restrictively large. In the case of BERI, a software debugging unit streams trace entries that are transmitted from the processor over
 a JTAG serial interface. The low throughput of JTAG makes trace compression particularly valuable. 
-This paper describes a hardware implementation of trace compression for BERI based on the VPC3 algorithm for 
-value-based trace prediction in software. Some elements of VPC3 proved difficult to translate into hardware or were not adaptable to a streaming application. We were able to the number of bytes transmitted over JTAG to 21.6\% of the uncompressed value, a 4.6 compression ratio. % TODO concluding sentence 
+This paper describes a hardware implementation of data trace compression for BERI based on the VPC algorithms for 
+value-prediction-based trace compression in software. Some elements of VPC proved difficult to translate into hardware or were not adaptable to a streaming application, but the model of using predictors to compress trace data at the hardware level is promising. 
+This implementation achieves a 4.6 compression ratio, which is lower than the best academic research implementations, but is
+on par with industry standards.
+
 \end{abstract}
 
 \section{Introduction}
 % briefly describe BERI
 % describe VPC3 in reasonable detail
 % especially describe the predictors you ended up using
-Execution traces are a common and often necessary tool for debugging and analyzing processors and software. Traces are usually large - on the order of multiple gigabytes per program - which makes storing them a challenge. Cambridge's Bluespec Extensible RISC Implementation (BERI) \cite{beri} generates a 256-bit trace entry for each instruction. 
-In many systems including BERI, traces are sent from the processor over a JTAG interface. JTAG's low throughput means that transmission of large amounts of trace data is also problematic. 
+Traces are a common and often necessary tool for debugging and analyzing processors and software. Extended data traces provide more data, such as register content and branch tags, than execution or address traces. Data traces can require multiple gigabytes of space per program, and storing them is a challenge. Cambridge's Bluespec Extensible RISC Implementation (BERI) \cite{beri} generates a 256-bit extended trace entry for each instruction. In many systems, including BERI, traces are sent from the processor over a JTAG interface. JTAG's low throughput makes transmission of large amounts of trace data difficult. 
 
-Solutions to the storage problem usually fall into one of two categories: regeneration and compression. Execution-driven solutions like ATOM \cite{ATOM} create binaries that produce a trace when executed, eliminating the need to store the trace at all. However, trace regeneration can be too slow or too expensive for some uses. It is also ISA specific, difficult to port, and can produce unrepeatable results for nondeterministic programs. Compression solves the issues of nondeterminism, but storing compressed traces still requires some disk space. Compressed traces must also be decompressed before they can be used.
+Compression helps to alleviate the storage and transmission problems. Compression can be implemented in hardware or software. Software solutions usually fall into one of two categories: regeneration and compression. Execution-driven solutions like ATOM \cite{ATOM} create binaries that produce a new trace on demand, eliminating the need to store the trace at all. However, trace regeneration can be too slow or too expensive for some uses. It is also ISA specific, difficult to port, and can produce unrepeatable results for nondeterministic programs. Compression solves the issues of nondeterminism, but storing compressed traces still requires some disk space. Compressed traces must also be decompressed before they can be used.
 
-The value-prediction-based compression (VPC) algorithms attempt to minimize the drawbacks of compression \cite{vpc}. Value predictors are designed to recognize patterns and extrapolate them to predict the values most likely to occur next. Value predictors have been shown to successfully predict the content of CPU registers [TODOcite/add more], which tend to contain data similar to that found in execution traces. When a value predictor successfully forecasts a trace entry, only the one-byte identifier of that value predictor need be recorded. 
+Prediction-based compression strategies have been extensively researched. The value-prediction-based compression (VPC) algorithms attempt to minimize the drawbacks of compression and were expressly designed for use with extended traces \cite{vpc}. Value predictors recognize patterns and extrapolate them to predict the values most likely to occur next. Value predictors have been shown to successfully predict the content of CPU registers using fast, simple algorithms \cite{burtscher1999} \cite{gabbay1996} \cite{goeman2001} \cite{rychlik1998} \cite{tullsen1999}. CPU registers tend to contain data similar to that found in data traces. When compressing traces with VPC, value predictors forecast the most likely values for the next PC and extended trace data. If one of the predictors is successful, only the identifier of that value predictor need be written, instead of the full trace entry. Zcompr uses a combination of prediction and interpretation to produce even better compression than VPC \cite{kanev2011}.
 
-VPC compression, like any compression strategy, focuses on alleviating the problem of \emph{storing} traces and thus implements the compression in software. This does not help with the transmission of the trace, and it requires an extra step after the trace has been produced. Hardware compression allows for quick transmission in addition to the reduced storage overhead, and compressing the trace as it is generated means that no additional steps are required after running the processor. However, certain software prediction techniques are more complicated to implement in hardware, so the VPC algorithms cannot be perfectly mapped to hardware without difficulty.
+VPC and Zcompr, like other software compression strategies, focus on alleviating the problem of \emph{storing} traces. This does not help with the real-time transmission of the trace, and it requires an extra step after the trace has been produced. Hardware compression allows for quick transmission in addition to the reduced storage overhead, and compressing the trace as it is generated means that no additional steps are required after running the processor.
 
-%TODO read more about existing hardware compression
-% TODO really add that ^^
-I implemented a trace compression mechanism in hardware for BERI based on VPC. The primary goal of compression was to reduce transmission time of traces being streamed by a software debugging application in real time. Because of the inherent differences between hardware and software and in streaming versus storage, VPC could not be perfectly mapped to hardware, but many of the techniques and ideas could. This project demonstrates the feasibility of porting VPC-like algorithms to hardware. The compression rate achieved was YY, but we believe this could be improved with additional time and refinement. %TODO the last sentence is lies and needs to go
+The majority of hardware trace compression techniques focus on execution or address traces. One popular address compression technique is to simply discard contiguous addresses and only report jumps or branches \cite{armspec} \cite{tc1775} \cite{nios2003}. The Nexus 5001 Forum defined a standard for packet-based tracing using a similar address filtering strategy \cite{nexus5001}. These strategies have low overhead and are easy to implement. However, they are limited by the size of the average basic block, which is usually only four or five instructions \cite{rotenberg1999}. Another strategy is to output the difference between each successive address, as in the MIPS PDTrace module \cite{mipspd}. With this method, compression is limited because consecutive instructions cannot be skipped. All of these techniques achieve compression ratios between 5 and 10x \cite{macnamee2000}. Research implementations have achieved significantly better compression results. Kao et al. proposed an LZ-compression-based mechanism that achieves up to 454:1 compression ratios, but at a high complexity (50,000 gates) \cite{kao2007}. Uzelac et al. developed a technique using prediction structures that they claim delivers a 1098:1 compression ratio \cite{uzelac2014}. 
 
-% desirable compression qualities: good compression rate, fast decompression, fast compression(?)
+There has been comparatively little research on hardware compression for extended trace data. One system, RATCHET \cite{thatssoratchet}, achieves 20-30:1 compression using a filter cache. However, RATCHET's traces do not capture branching behavior, so they are only reliable for cache behavior analysis, not program analysis. Industry standard compression ratios for for hardware extended trace compression are also on the order of 5-10x \cite{hopkins2006}.  
+
+I implemented an extended trace compression mechanism in hardware for BERI based on VPC. The primary goal of compression was to reduce transmission time of traces being streamed by a software debugging application in real time. Because of the inherent differences between hardware and software and in streaming versus storage, VPC could not be perfectly mapped to BERI, but many of the techniques and ideas could. This project demonstrates the feasibility of porting VPC-like prediction algorithms to hardware to achieve compression rates on par with industry standards. 
+
 
 \section{Background}  
-This project's hardware trace compression mechanism was based on the VPC algorithms. VPC is single-pass, which is convenient for storage because it means that the trace need never be fully uncompressed, and it is necessary for compressing traces for transmission during real time streaming. In VPC1, 37 value predictors are applied to the trace data. In the event of a successful prediction, the predictor identification code is written to a file after being further compressed to one byte by a dynamic Huffman encoder. If there are no successful predictions, a flag is written to the file, followed by the unpredictable data. The output of VPC1 is quite compressible, so VPC2 adds a stage to do so. VPC3 uses fewer value predictors and attempts to predict both the PC and the trace data. In VPC3, the compressed trace output is divided into four streams that can be further compressed easily: identifiers of PC predictors, unpredictable PC data, identifiers of trace data predictors, and unpredictable trace data. Each of the four streams is then compressed with BZIP2. VPC4 is a faster, better compressing version of VPC3.
+This project's hardware trace compression mechanism was based on the VPC algorithms. VPC is single-pass, which is convenient for storage because it means that the trace need never be fully uncompressed, and it is necessary for compressing traces for transmission during real time streaming. In VPC1, 37 value predictors are applied to the trace data. In the event of a successful prediction, the predictor identification code is written to a file after being further compressed to one byte by a dynamic Huffman encoder. If there are no successful predictions, a flag is written to the file, followed by the unpredictable data. The output of VPC1 is quite compressible, so VPC2 adds a stage to do so. VPC3 uses fewer value predictors and attempts to separately predict both the PC and the trace data. In VPC3, the compressed trace output is divided into four streams that can be further compressed easily: identifiers of PC predictors, unpredictable PC data, identifiers of trace data predictors, and unpredictable trace data. Each of the four streams is then compressed with BZIP2. VPC4 is a faster, better compressing version of VPC3.
 
-One of the value prediction algorithms used in VPC3 is the finite context method (FCMn) [TODOcite]. FCMn hashes the $n$ most recently encountered values to serve as an index into a history table. The value at this index is used as the prediction, hoping that the value that follows in this case will be the same as the value that followed last time these $n$ values were encountered. The value at the index is updated with the current value (PC or trace data) if the prediction was wrong. FCMn predictors are useful for long, arbitrary repeating sequences such as PCs. 
+In this project, I used some of the same value predictors as VPC3, including the finite context method (FCMn) \cite{sazeides1997}. FCMn hashes the $n$ most recently encountered values to serve as an index into a history table. The value at this index is used as the prediction, hoping that the value that follows in this case will be the same as the value that followed last time this series of $n$ values was encountered. The value at the index is updated with the current value (PC or trace data) if the prediction was wrong. FCMn predictors are useful for long, arbitrary repeating sequences such as PCs. 
 
-Last $n$ value predictors (LnV) [TODOcite] are another history-based predictor. They simply use the $n$ most recent values as $n$ predictions. LnV predictors perform well with values that alternate or with repeating sequences that have a period of no more than $n$. 
+Last $n$ value predictors (LnV) \cite{burtscher1999} are another history-based predictor. They simply use the $n$ most recent values as $n$ predictions. LnV predictors perform well with values that alternate or with repeating patterns that have a period of no more than $n$. 
 
-Stride 2-delta predictors (ST2D) [TODOcite] store the most recent value and the difference between the most recent value and the one that preceded it. The predicted value is the most recent value plus the difference. It also maintains a second delta value for a second prediction. The second delta is only updated when the same difference is encountered twice in a row. ST2D predictors perform well at predicting numbers in series that are incremented or decremented by a fixed amount, such as loop indices and other types of counters. 
+Stride 2-delta predictors (ST2D) \cite{gabbay1996} store the most recent value and the difference (delta) between the most recent value and the one that preceded it. The predicted value is the most recent value plus the difference. It also maintains a second delta value for a second prediction. The second delta is only updated when the same difference is encountered twice in a row. ST2D predictors perform well at predicting numbers in sequences that are incremented or decremented by a fixed amount, such as loop indices and other types of counters. ST2D predictors were not used in VPC3, but they were found to be advantageous in the BERI compressor. 
+\begin{figure}[!b]
+\centering
+\includegraphics[width=2.5in]{images/trace_types.png}
+\caption{BERI's 256-bit TraceEntry struct}
+\label{trace_types}
+\end{figure}
+
 
 \section{Compression Implementation}
 % something about the fact that it's single-pass
 The compression mechanism described here is somewhat of combination between VPC1 and VPC3. Like VPC3, we use a smaller subset of the most successful predictors to forecast both the PC and the trace data. Because the primary use case requires traces to be individually compressed and quickly decompressed for real-time streaming, the strategy of writing to multiple streams and performing BZIP2 compression on the streams is not applicable. Like VPC1, all data is written to the same output. If the predictions are incorrect, a flag and the unpredictable full trace are transmitted. The predictors used are a subset of those implemented in VPC3. PCs are predicted with FCM1ab (finite context method using the single most recent PC and providing two predictions) and an FCM3ab (finite context method using the three most recent PCs and providing two predictions) for a total of four predictions. Trace data is predicted using L4V (last $n$ value predictor with $n=4$) and stride 2-delta algorithms. 
 
-PC predictions were necessarily implemented with global index information, meaning that the PC predictions were based on the most recent PC values in the program execution. The trace predictions were PC-specific, so the L4V predictor returned the last four trace values encountered at a given PC, and the ST2D predictor returned the most recent value and delta for the previous occurrence of the current PC.  
+PC predictions were necessarily implemented with global index information, meaning that the PC predictions are based on the most recent PC values in the whole program's execution. The trace predictions are PC-specific, so the L4V predictor returns the last four trace values encountered at a particular PC, and the ST2D predictor returns the most recent value and delta for the previous occurrence of that PC. If multiple predictions are correct for a particular field, ties are broken by selecting the one with the highest use count.  
 
-Unlike any of the VPC algorithms, the trace data is divided into groups of fields, and each group is predicted separately. This is because some of the trace fields are much easier to predict than others, and some respond better to different prediction techniques. For example, BERI traces include an increasing \texttt{count} field, which is predicted reasonably well using ST2D but not at all with LnV. If the compressor is designed to treat all trace data as a unit, then correctly predicting all the data but one register, or correctly predicting all of the data but not all with the same predictor, still means that the whole prediction is invalid and the full trace must be transmitted. Predicting groups of fields separately from the rest of the data allows for some compression even when the more difficult predictions fail. However, it increases the minimum size of the transmission when all data is predicted perfectly and thus decreases the maximum compression attainable. 
+Unlike any of the VPC algorithms, I divided the BERI trace data into groups of fields and predicted each group separately. This is because some of the trace fields are much easier to predict than others, and some respond better to different prediction techniques. For example, BERI traces include an increasing \texttt{count} field, which is predicted reasonably well using ST2D but not at all with LnV. If the compressor is designed to treat all trace data as a unit, then correctly predicting all the data but one register, or correctly predicting all of the data but not all with the same predictor, still means that the whole prediction is invalid and the full trace must be transmitted. Predicting groups of fields separately from the rest of the data allows for some compression even when the more difficult predictions fail. 
 
-The VPC software algorithms based their predictors on one- or two-level hash tables implemented using C arrays. The hardware implementation relied on BRAM modules to implement hash tables. We did not use any two-level tables in the final hardware compression implementation, because there was no significant benefit to prediction accuracy to offset the additional delay required to index into both levels of the table for lookups and updates. 
+The VPC software algorithms based their predictors on one- or two-level hash tables implemented using C arrays. The hardware implementation relied on BRAM modules to implement hash tables. I did not use any two-level tables in the final hardware compression implementation, because there was no significant benefit to prediction accuracy to offset the additional delay required to index into both levels of the table for lookups and updates. 
 
-% TODO could say I implemented the two-level table ones but they were marginally more effective than lnv and took longer because they were two cycles. OR maybe I didn't do more different predictors/more tables because I added stuff to predict regs separately. 
-%TODO at least explain that you didn't implement the two-level tables. Also say something about PCs being global but traces being indexed by PC. 
+The compression module interfaces with BERI's DebugUnit. A secondary goal of the project was to change the existing structure of BERI as little as possible. The compressor provides a GetPut interface where the DebugUnit can enqueue trace entries for compression. A combination of methods and rules performs the lookups and updates with the BRAM predictor tables. The results are packed into a \texttt{CompressedTraceEntry}, a struct containing a valid bit; the four-bit version; three-bit predictor identifiers for the PC, the group of easily predicted fields\footnote{The predictor groups are further explained in the Results section}, each register, and the count; and some combination of mispredicted data or padding to fill 256 bits. The DebugUnit expects a 256-bit value, but based on the prediction results encoded in the version field, will send only the first $n$ bytes in a MessagePacket to the software stream tracing application. If all fields are predicted correctly, only three bytes are needed (the valid, version and predictor identifiers use 18 bits total). If the registers, PC, or count are mispredicted, the correct value is sent with the message packet. Exceptions occur if the ``easy data" is mispredicted or if all of the other data fields are mispredicted; in this case, the original trace entry is sent uncompressed. This is in part to reduce the complication of the decompression logic and in part because some of the sixteen possible versions are reserved, so the number of states that can be communicated to the DebugUnit and decompresser is more limited.  
 
 \section{Evaluation Methods}
 \subsection{System}
 % TODO get the same info for the lab machine (acs23) that the dude included in his paper
+Experiments were performed running a simulation of the BERI processor on an Intel Core i5 running Ubuntu 3.2.0 with four 1197MHz CPUs, 32kB L1 caches, 256kB L2 cache, and 8192kB L3 cache. 
 \subsection{Timing Measurements}
-As in the analysis of the VPC algorithms, we measured runtime using the UNIX shell \texttt{ctime} command. We report the sum of the user and system time, which equates to reporting the CPU time. 
+As in the analysis of the VPC algorithms, runtime was measured using the UNIX shell \texttt{time} command. The sum of the user and system time is reported, which equates to reporting the CPU time. 
 \subsection{Traces} % only if I get some interesting traces
-Compression was testing using a BERI simulation running a short program (268,084 instructions) with a diverse variety of operations, including implementations of bubble sort, quick sort, and modular exponentiation. It is a weakness of this experiment that only one program was available to run on the simulated BERI processor.
+Compression was testing using a BERI simulation running a short program (268,084 instructions) with a variety of operations, including implementations of bubble sort, quick sort, and modular exponentiation. It is a weakness of this experiment that only one program was available to run on the simulated BERI processor.
 
 \section{Results}
+
+\begin{figure}
+\begin{tikzpicture}
+\begin{axis}[
+    symbolic x coords={G1, G2, G3*, G4},
+    xtick=data,
+    ylabel=Compression Ratio],
+    \addplot[ybar,fill=blue] coordinates {
+        (G1,2.1)
+        (G2,2.8)
+        (G3*,4.6)
+        (G4,4.0)
+    };
+\end{axis}
+\end{tikzpicture}
+\label{group_chart}
+\caption{Compression ratios for different prediction groupings of trace fields. All groups predicted ex, asid, branch, reserved, and inst as one group and predicted PC individually. G1 predicted regVal1, regVal2, and count as one unit of data. G2 used regVal1 as a group and regVal2 with count as a second group. G3 predicted count, regVal1, and regVal2 separately. G4 predicted the registers separately and transmitted the count value uncompressed.}
+\end{figure}
+
 \subsection{Prediction Groups}
 %The fields in a BERI trace are: valid, version, ex, count, asid, branch, reserved, instruction, pc, register value 1, and register value 2. 
-The fields in a BERI trace are show in Figure TODO. The count and register fields change in the most complex manner, and we experimented to find the optimal number of predictors and groups of data to maximize compression. Figure TODO also shows the compression results for the four best performing groupings. The valid and version fields are necessary for the trace transmission and are not compressed; they also only contribute 5 bits. In the optimal division, the PC is predicted and compressed individually. The \texttt{ex, asid, branch, reserved} and \texttt{inst} fields are predicted as one group. Each of the \texttt{count, regVal1,} and \texttt{regVal2} fields are predicted separately. Not shown in the figure are the results attained with the same divisions as the optimal grouping but with the \texttt{count} predictor indexed globally instead of with the PC. That is to say, the ST2D predictor that was used to forecast the \texttt{count} field stored the deltas between the most recent count values, regardless of PC. Using this strategy resulted in only 3\% compression, indicating that \texttt{count} is closely tied to the PC and PC-related data.
+The fields in a BERI trace are show in Figure \ref{trace_types}. The count and register fields change in the most complex manner, and we experimented to find the optimal number of predictors and groups of data to maximize compression. Figure 2 shows the compression results for the four best performing groupings. The valid and version fields are necessary for the trace transmission and are not compressed; they also only contribute 5 bits. In the optimal division, the PC is predicted and compressed individually. The \texttt{ex, asid, branch, reserved} and \texttt{inst} fields almost never change for a given PC and are easy to predict, so they are predicted as one group. Each of the \texttt{count, regVal1,} and \texttt{regVal2} fields are predicted separately. Not shown in the figure are the results attained with the same divisions as the optimal grouping but with the \texttt{count} predictor indexed globally instead of with the PC. That is to say, the ST2D predictor that was used to forecast the \texttt{count} field stored the deltas between the most recent count values, regardless of PC. Using this strategy resulted in only 3\% compression, indicating that \texttt{count} is closely tied to the PC and PC-related data.
 
 \subsection{Compression Rate}
-The best performing grouping (PC, registers, and count predicted individually, other fields predicted as a unit) produced a compression ratio of 4.6, reducing the volume of data transmitted from the processor by 78\%. Figure TODO compares this compression ratio to some other popular software and hardware compression algorithms. %TODO explain more of the graph 
+The best performing grouping (PC, each register, and count predicted individually, other fields predicted as a unit) produced a compression ratio of 4.6, reducing the volume of data transmitted from the processor by 78\%. Figure 3 compares this compression ratio to some other popular software and hardware compression algorithms. The BERI implementation is on par with the compression mechanisms used in industry, but it is outperformed by research implementations of hardware and especially software data trace compression. 
 
-\subsection{Execution Time}
-Running the simulation and test program with no compression took XX seconds. Adding the hardware compression stage took YY seconds. 
+
+\subsection{Compression Time}
+Running the simulation and test program with no compression took an average of 27.61 milliseconds. With hardware compression, the simulation took 27.71 milliseconds, an increase of only 0.37\%. Modifying the software debugging application to perform the decompression was out of the scope of this project, so unfortunately no data is available on transmission or decompression time. 
+
 
 \section{Discussion}
 
-Because we are compressing each trace individually for transmission from the processor to the debugging software, this strategy has a theoretical maximum compression rate of 256 (if we were able to compress each 256-bit trace to only one bit of data). VPC3 and VPC4 achieve significantly better results by further compressing the streams with BZIP2, but BZIP2 does not yet have a hardware implementation. % so it would be better to use an algorithm that can compress several traces together
+% theoretical max/min is fine. mention that we need to get past one byte/entry
+% something about software vs hardware or theoretical maxes
+% say ratchet sucks because
 
-Because the compression was implemented in hardware, the number of predictors and the size of the prediction tables had to be more restricted than in software. % this didn't really end up mattering that much because I don't think it would have made a difference
+The BERI compression module could certainly be improved in many ways, but it achieves a compression rate comparable to industry standard. Moreover, RATCHET, the better-performing hardware data trace compressor, has major limitations: namely, its inability to capture branching behavior. Software data tracing has been studied more extensively, but many of the enhancements that made VCP3 and VPC4 so fast and effective are either infeasible or impractical for hardware stream tracing. Still, we can see that the use of value prediction techniques for compression is sound, and prediction is already widely implemented and highly effective in hardware such as branch predictors.  
 
-Many of the enhancements that have made VCP3 and VPC4 so fast and effective are either infeasible or impractical for hardware stream tracing. However, the use of value prediction techniques for compression seems to be sound, especially because prediction is already used ubiquitously in hardware. 
-Though we experimented with finding optimal values for many parameters, there are almost limitless opportunities to continue tweaking values in hopes of perfecting the predictors. The number of bits in the keys for the BRAMs and the order the predictors are encountered are just two of the values that affect the outcomes of the predictors. Further analysis of these parameters could yield better results. However, it is important to keep in mind that the maximum compression rate that this style of algorithm can have when implemented in hardware and intended for stream tracing is 256. Instead of perfecting parameters for the predictors, it might be more worthwhile to investigate a second compression stage (analogous to BZIP2 in VPC3) that could be implemented in hardware, or other compression paradigms altogether. 
+A major divergence in design from VPC was the decision to predict some fields of the trace data separately instead of as a unit. This demonstrates a tradeoff between making more accurate predictions and maximizing compression. There are two ways to increase prediction accuracy: use more predictors, or predict more fields individually so as to avoid the complex dynamics of multiple fields changing in different ways. But both of these strategies increase the minimum number of bits needed for predictor identifiers (either in the form of more bits per predictor encoding or more predictor encodings). This increases the minimum size of the transmission when all data is predicted perfectly and thus decreases the maximum compression attainable. 
+ 
+We experimented with finding optimal values for many parameters, but there are almost limitless opportunities to continue tweaking values in hopes of perfecting the predictors. The number of bits in the keys for the BRAMs and the order the predictors are encountered are just two of the values that affect the outcomes of the predictors. Further analysis of these parameters could yield better results. Similarly, the minimum trace size for each entry in this implementation is three bytes. With more experiments and fine-tuning, it would be possible to reduce this number. But any strategy in which each entry is compressed in isolation has a theoretical maximum compression rate equal to the size of the original data to be transmitted (256 in this case, if it were possible to compress each 256-bit trace to one bit of data). VPC3 and VPC4 achieve significantly better results by further compressing the streams with BZIP2, but BZIP2 does not yet have a hardware implementation. Other strategies predict multiple values at once, or use consistent patterns to avoid sending data until the pattern changes. Exploring some form of one of these strategies has the potential to yield far better returns. To have a truly effective compression algorithm competitive with the best research implementations, one needs to compress trace entries to less than one bit.
 
-% talk about tradeoffs of breaking up traces into chunks of predictable data
+ \begin{figure}
+ \begin{tikzpicture} 
+ \begin{axis}[ 
+     ybar,
+     xtick={1,...,7},
+     xticklabels from table = {comp.dat}{Title},
+     xtick align=inside,
+     every axis x label/.style={at={(ticklabel cs:0.5)},anchor=north east},
+     ylabel=Log(Compression Ratio),
+     every axis y label/.style={at={(ticklabel cs:0.5)},rotate=90,anchor=near ticklabel}
+ ] 
 
-% talk about how this trace entry was kind of easy to predict (might even be able to do it all in one shot with st2d preds)
+ %Paper's due today, and I spend unreasonable amounts of time on one graph
+ \addplot[ybar, bar shift=0pt, fill=blue,
+     discard if not={Idx}{3},
+         ] table [ 
+     x=Coord,
+     y=Ratio
+ ] {comp.dat} ;
+
+ \addplot[ybar, bar shift=0pt, fill=red,
+     discard if not={Idx}{2},
+        ] table [ 
+     x=Coord,  
+     y=Ratio
+ ] {comp.dat} ;
+
+ \addplot[ybar, bar shift=0pt, fill=green,
+     discard if not={Idx}{1},
+         ] table [ 
+     x=Coord, 
+     y=Ratio
+ ] {comp.dat} ;
+
+ \end{axis} 
+ \end{tikzpicture} 
+ \label{comparison}
+ \caption{Comparison of log of compression rate for a sample of industry and academic implementations. The blue bars indicate industry standard, green bars indicate academic research, and the red bar is for the compressor in this paper. Note that zcompr and VPC3 are software compressors; all others are hardware}
+
+ \end{figure}
+  
+
 \section{Future Work}
 % decompression lol
-
 % implementing two-level tables? or nah - might not even predict better
+The relatively short time frame for this project left many things unimplemented or unexplored. There are two obvious and necessary next steps: alter the software stream tracing application to decompress the traces, and performing synthesis and hardware cost analysis of the compressor module. Other avenues for investigation include finding a hardware analogue to BZIP2 in VPC3 that could be used to further compress the outputs of the predictors and experimenting with other value predictors. It may also be possible to encode multiple trace entries at once by predicting the data for a sequence of instructions. This would require more substantial changes to the hardware DebugUnit and the debugging software, but it would allow for much greater compression. Finally, this compression implementation is specific to the current BERI TraceEntry. Changes to the TraceEntry content could significantly alter the performance of the predictor. It would be ideal to have a more flexible compressor that could handle a variety of trace entry types with different data exhibiting different patterns.
 
-%TODO move this if i make an st2d (which I will)
 \section{Conclusion}
+I implemented a value-predictor-based trace compression mechanism in hardware that delivers a 4.6:1 compression ratio. This ratio is on par with many industry hardware compression implementations. Recent academic compression approaches achieve compression ratios that are hundreds of times better, but the best of the academic examples are based on similar techniques of prediction. This project was extremely valuable for learning about compression and prediction techniques, learning Bluespec, and understanding more of the fundamental design differences between software programming languages and hardware development languages. 
+
+
+
+
 
 \bibliographystyle{plain}
 \bibliography{acd}
-
 
 
 % that's all folks
@@ -486,16 +285,8 @@ Though we experimented with finding optimal values for many parameters, there ar
 % The subfigure.sty package works much the same way, except \subfigure is
 % used instead of \subfloat.
 %
-%\begin{figure*}[!t]
-%\centerline{\subfloat[Case I]\includegraphics[width=2.5in]{subfigcase1}%
-%\label{fig_first_case}}
-%\hfil
-%\subfloat[Case II]{\includegraphics[width=2.5in]{subfigcase2}%
-%\label{fig_second_case}}}
-%\caption{Simulation results}
-%\label{fig_sim}
-%\end{figure*}
-%
+
+
 % Note that often IEEE papers with subfigures do not employ subfigure
 % captions (using the optional argument to \subfloat), but instead will
 % reference/describe all of them (a), (b), etc., within the main caption.
